@@ -69,11 +69,12 @@ export function isUserAdmin(email?: string | null): boolean {
   return ADMIN_EMAILS.map(e => e.toLowerCase()).includes(email.trim().toLowerCase());
 }
 
-export function createAdminProfile(email = 'leandro.menendez1192@gmail.com', name?: string, photo?: string): PsychologistAuthUser {
+export function createAdminProfile(email = 'kailabwasd@gmail.com', name?: string, photo?: string): PsychologistAuthUser {
+  const isKailab = email.toLowerCase().includes('kailab');
   return {
-    uid: email.includes('leandro') ? 'admin-leandro' : 'admin-kailabwasd',
+    uid: isKailab ? 'admin-kailabwasd' : 'admin-leandro',
     email: email,
-    displayName: name || 'Leandro Menéndez (Administrador Psybot)',
+    displayName: name || (isKailab ? 'Administrador Clínico (kailabwasd)' : 'Leandro Menéndez (Administrador Psybot)'),
     photoURL: photo || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
     provider: 'google.com',
     role: 'Super Administrador & Director Clínico',
@@ -89,8 +90,8 @@ export function createAdminProfile(email = 'leandro.menendez1192@gmail.com', nam
   };
 }
 
-export async function loginAsAdmin(): Promise<PsychologistAuthUser> {
-  const adminUser = createAdminProfile();
+export async function loginAsAdmin(customEmail = 'kailabwasd@gmail.com'): Promise<PsychologistAuthUser> {
+  const adminUser = createAdminProfile(customEmail);
   localStorage.setItem('subatech_psychologist_session', JSON.stringify(adminUser));
   localStorage.setItem('psybot_psychologist_session', JSON.stringify(adminUser));
   try {

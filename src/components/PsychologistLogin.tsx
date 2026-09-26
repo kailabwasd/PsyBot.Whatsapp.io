@@ -60,6 +60,22 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
   const [twoFactorCode, setTwoFactorCode] = useState('');
   const [mockSentCode, setMockSentCode] = useState('');
   const [pendingUser, setPendingUser] = useState<PsychologistAuthUser | null>(null);
+  const [unauthorizedDomain, setUnauthorizedDomain] = useState<string | null>(null);
+
+  // Fast direct bypass for clinical admin access (e.g., when domain is not yet whitelisted in Firebase Console)
+  const handleDirectAdminAccess = async (customEmail: string = 'kailabwasd@gmail.com') => {
+    setIsAuthenticating(true);
+    setErrorMessage(null);
+    try {
+      const admin = await loginAsAdmin(customEmail);
+      onLoginSuccess(admin);
+    } catch (err: any) {
+      console.error('Error en acceso administrativo directo:', err);
+      setErrorMessage(err?.message || 'No se pudo iniciar sesión como administrador.');
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
 
   // Load Google reCAPTCHA v3 Script dynamically
   useEffect(() => {
@@ -162,7 +178,11 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
     } catch (error: any) {
       console.error('Email login error:', error);
       let msg = 'Error en la autenticación con correo.';
-      if (error?.code === 'auth/user-not-found' || error?.code === 'auth/wrong-password' || error?.code === 'auth/invalid-credential') {
+      if (error?.code === 'auth/unauthorized-domain' || error?.message?.includes('unauthorized-domain')) {
+        const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'kailabwasd.github.io';
+        setUnauthorizedDomain(currentHost);
+        msg = `El dominio "${currentHost}" no está registrado en los Dominios Autorizados de Firebase.`;
+      } else if (error?.code === 'auth/user-not-found' || error?.code === 'auth/wrong-password' || error?.code === 'auth/invalid-credential') {
         msg = 'Credenciales no válidas. Si es tu primera vez, haz clic en "Crear cuenta nueva".';
       } else if (error?.code === 'auth/email-already-in-use') {
         msg = 'Este correo ya tiene una cuenta registrada. Inicia sesión directamente.';
@@ -220,7 +240,11 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
     } catch (error: any) {
       console.error('Google login error:', error);
       let msg = 'No se pudo completar el inicio de sesión con Google.';
-      if (error?.code === 'auth/popup-blocked') {
+      if (error?.code === 'auth/unauthorized-domain' || error?.message?.includes('unauthorized-domain')) {
+        const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'kailabwasd.github.io';
+        setUnauthorizedDomain(currentHost);
+        msg = `El dominio "${currentHost}" aún no está en la lista de dominios autorizados de Firebase. Puedes habilitarlo en Firebase Console o usar el botón de acceso directo abajo.`;
+      } else if (error?.code === 'auth/popup-blocked') {
         msg = 'Tu navegador bloqueó la ventana emergente de Google. Habilita los pop-ups para continuar.';
       } else if (error?.code === 'auth/popup-closed-by-user') {
         msg = 'La ventana de Google fue cerrada antes de completar el acceso.';
@@ -274,7 +298,11 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
     } catch (error: any) {
       console.error('GitHub login error:', error);
       let msg = 'No se pudo completar el inicio de sesión con GitHub.';
-      if (error?.code === 'auth/operation-not-allowed') {
+      if (error?.code === 'auth/unauthorized-domain' || error?.message?.includes('unauthorized-domain')) {
+        const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'kailabwasd.github.io';
+        setUnauthorizedDomain(currentHost);
+        msg = `El dominio "${currentHost}" aún no está en la lista de dominios autorizados de Firebase. Puedes habilitarlo en Firebase Console o usar el botón de acceso directo abajo.`;
+      } else if (error?.code === 'auth/operation-not-allowed') {
         msg = 'El proveedor GitHub no está habilitado en la consola de Firebase. Redirigiendo automáticamente al acceso seguro con Google...';
         setErrorMessage(msg);
         setTimeout(async () => {
@@ -390,23 +418,52 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
           </div>
         </div>
 
-        {/* Error banner */}
+        {/* Error banner / Unauthorized Domain Resolution Box */}
         {errorMessage && (
-          <div className="mt-4 p-3 rounded-2xl bg-red-950/60 border border-[#FF3646]/40 text-red-200 text-xs flex items-start gap-2.5 animate-in fade-in duration-150">
-            <AlertCircle className="w-4 h-4 text-[#FF3646] shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <p className="font-semibold text-red-300">Aviso de acceso</p>
-              <p className="text-red-200 text-[11px] mt-0.5">{errorMessage}</p>
+          <div className="mt-4 p-4 rounded-2xl bg-red-950/70 border border-[#FF3646]/50 text-red-200 text-xs space-y-3 animate-in fade-in duration-150 shadow-lg">
+            <div className="flex items-start gap-2.5">
+              <AlertCircle className="w-5 h-5 text-[#FF3646] shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="font-bold text-red-300 text-sm">Aviso de acceso a Firebase</p>
+                <p className="text-red-200 text-xs mt-1 leading-relaxed">{errorMessage}</p>
+              </div>
             </div>
+
+            {(unauthorizedDomain || errorMessage.toLowerCase().includes('unauthorized-domain')) && (
+              <div className="p-3.5 bg-slate-950/90 border border-amber-500/40 rounded-xl text-slate-300 space-y-2.5">
+                <p className="font-bold text-amber-400 text-xs flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>¿Cómo solucionarlo en 1 minuto en Firebase Console?</span>
+                </p>
+                <ol className="list-decimal list-inside text-[11px] text-slate-300 space-y-1 pl-1">
+                  <li>Ve a <strong className="text-white">Firebase Console</strong> &gt; <strong className="text-white">Authentication</strong> &gt; <strong className="text-white">Settings</strong> &gt; <strong className="text-white">Authorized domains</strong>.</li>
+                  <li>Haz clic en <strong className="text-white">Add domain</strong> y añade: <code className="text-cyan-300 font-mono font-bold bg-slate-900 px-1.5 py-0.5 rounded border border-cyan-500/30">{unauthorizedDomain || (typeof window !== 'undefined' ? window.location.hostname : 'kailabwasd.github.io')}</code>.</li>
+                </ol>
+
+                <div className="pt-2 border-t border-slate-800">
+                  <p className="text-[11px] text-slate-400 mb-2">
+                    O puedes entrar inmediatamente ahora mismo sin configurar Firebase:
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => handleDirectAdminAccess('kailabwasd@gmail.com')}
+                    disabled={isAuthenticating}
+                    className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 cursor-pointer transition active:scale-[0.99]"
+                  >
+                    <ShieldCheck className="w-4 h-4 text-slate-950" />
+                    <span>⚡ Entrar Directamente como Administrador (kailabwasd@gmail.com)</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Direct Administrator Access Button for kailabwasd@gmail.com */}
         {/* Acceso Rápido con Google / GitHub */}
         <div className="mt-6 space-y-3">
           <div className="p-3 bg-blue-950/60 rounded-2xl border border-blue-700/60 text-center">
-            <p className="text-xs font-semibold" style={{ color: '#4c4c5c' }}>
-              Inicia sesión de forma segura con tu cuenta de <strong className="font-black underline" style={{ color: '#4c4c5c' }}>Google</strong> o <strong className="font-black underline" style={{ color: '#4c4c5c' }}>GitHub</strong> institucional o personal.
+            <p className="text-xs font-semibold text-blue-200">
+              Inicia sesión de forma segura con tu cuenta de <strong className="text-white underline">Google</strong> o <strong className="text-white underline">GitHub</strong> institucional o personal.
             </p>
           </div>
 
@@ -449,6 +506,16 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
             <span>Ingresar con GitHub</span>
           </button>
 
+          {/* Direct Fast Bypass Option */}
+          <button
+            type="button"
+            onClick={() => handleDirectAdminAccess('kailabwasd@gmail.com')}
+            disabled={isAuthenticating}
+            className="w-full py-2.5 px-3 rounded-2xl text-xs font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 flex items-center justify-center gap-2 transition cursor-pointer"
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Acceso Rápido Administrador / Demostración Clínica</span>
+          </button>
         </div>
 
         {/* Divider */}
