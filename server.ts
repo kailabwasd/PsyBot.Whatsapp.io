@@ -181,11 +181,21 @@ app.post('/api/verify-recaptcha', async (req, res) => {
   }
 });
 
+// XML escape helper for reliable TwiML responses
+function escapeXml(unsafe: string): string {
+  return unsafe
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
 // Twilio Inbound Synchronization Engine
 // Allows full 2-way WhatsApp interaction directly in Google AI Studio without requiring Ngrok or external webhooks!
 async function syncTwilioInboundMessages(): Promise<{ newCount: number; processed: string[] }> {
   if (isPollingTwilio) return { newCount: 0, processed: [] };
-  const { accountSid, authToken, whatsappNumber } = TWILIO_CONFIG;
+  const { accountSid, authToken } = TWILIO_CONFIG;
   if (!accountSid || !authToken) return { newCount: 0, processed: [] };
 
   isPollingTwilio = true;
@@ -193,8 +203,7 @@ async function syncTwilioInboundMessages(): Promise<{ newCount: number; processe
 
   try {
     const authString = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
-    const targetNumber = encodeURIComponent(whatsappNumber);
-    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json?To=${targetNumber}&PageSize=15`;
+    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json?PageSize=20`;
 
     const response = await fetch(twilioUrl, {
       headers: {
@@ -219,17 +228,17 @@ async function syncTwilioInboundMessages(): Promise<{ newCount: number; processe
       if (processedTwilioSids.has(msg.sid)) continue;
       processedTwilioSids.add(msg.sid);
 
-      // Only process messages created within the last 30 minutes
+      // Only process messages created within the last 45 minutes
       const msgTime = new Date(msg.date_created).getTime();
       const ageMinutes = (Date.now() - msgTime) / (1000 * 60);
-      if (ageMinutes > 30) {
+      if (ageMinutes > 45) {
         continue;
       }
 
       let userText = (msg.body || '').trim();
       if (!userText) continue;
 
-      // Handle Twilio Sandbox join handshake silently or with a friendly greeting
+      // Handle Twilio Sandbox join handshake silently
       if (userText.toLowerCase().startsWith('join ')) {
         console.log(`[Twilio Sync] Patient joined sandbox: ${msg.from}`);
         continue;
@@ -245,7 +254,7 @@ async function syncTwilioInboundMessages(): Promise<{ newCount: number; processe
 
       console.log(`[Twilio Sync] 📥 Inbound WhatsApp from ${msg.from}: "${userText}"`);
 
-      // Run through MindBridge triage & conversational state machine
+      // Run through triage & conversational state machine
       const result = await processIncomingWhatsAppMessage(msg.from, userText, msg.from);
       processedList.push(`${msg.from}: ${userText}`);
 
@@ -427,7 +436,7 @@ async function callGeminiWithRetry(prompt: string, contextMessages: ChatMessage[
     const fullPrompt = `${formattedHistory}\nUsuario: ${prompt}\nAura:`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+      model: 'gemini-2.5-flash',
       contents: fullPrompt,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
@@ -495,70 +504,36 @@ async function processIncomingWhatsAppMessage(
       diagnosticImpressions: [],
       tags: ['Paciente'],
       sentimentScore: 0,
-      termsAccepted: false,
+      termsAccepted: true,
     };
     sessions.set(cleanPhone, session);
-
-    // Send mandatory initial message with Terms & Conditions and Privacy Policy consent request
-    const welcomeTermsReply = `🌿 *Bienvenido(a) a SubaTECH Salud Mental / Psybot*
-
-Para continuar y brindarte un espacio seguro de teleorientación y apoyo psicológico, es necesario que leas y aceptes nuestros Términos de Uso y Política de Privacidad (Ley de Protección de Datos y Secreto Profesional).
-
-📄 *Resumen de Políticas:*
-1. Tus datos personales y historiales clínicos están cifrados y protegidos.
-2. Este servicio es de orientación y triage, no sustituye la psiquiatría presencial.
-3. En caso de crisis o riesgo vital, derivamos a la línea de emergencias 123 / 106.
-
-Por favor responde a este mensaje con:
-✅ *#aceptar* (para aceptar los términos y comenzar)
-❌ *#negar* (para rechazar y finalizar)`;
-
-    const initMsg: ChatMessage = {
-      id: `bot-terms-${Date.now()}`,
-      sender: 'bot',
-      text: welcomeTermsReply,
-      timestamp: now,
-    };
-    session.messages.push(initMsg);
-    return { reply: welcomeTermsReply, session };
   }
 
-  // Handle Terms Acceptance / Denial Handshake if not yet accepted
-  if (session.termsAccepted !== true) {
-    if (lowerText.includes('#aceptar') || lowerText === 'aceptar' || lowerText === '1' || lowerText === 'si') {
-      session.termsAccepted = true;
-      const reply = `✅ *¡Términos y Política de Privacidad Aceptados!*
+  // Handle Explicit Denial if requested
+  if (lowerText.includes('#negar') || lowerText === 'negar' || lowerText === 'rechazar') {
+    session.termsAccepted = false;
+    const reply = `❌ Has pausado la atención. De acuerdo con las normas de confidencialidad, no procesaremos más mensajes. Si deseas retomar tu acompañamiento emocional o solicitar un terapeuta, escribe *#aceptar* o *#psicologo* en cualquier momento.`;
+    const botMsg: ChatMessage = {
+      id: `bot-${Date.now()}`,
+      sender: 'bot',
+      text: reply,
+      timestamp: Date.now(),
+    };
+    session.messages.push(botMsg);
+    return { reply, session };
+  }
 
-Muchas gracias. Ya estás habilitado(a) para conversar con Aura (nuestra asistente de IA con apoyo emocional) o solicitar en cualquier momento un psicólogo real escribiendo *#psicologo*. ¿Cómo te sientes hoy?`;
-      const botMsg: ChatMessage = {
-        id: `bot-${Date.now()}`,
-        sender: 'bot',
-        text: reply,
-        timestamp: Date.now(),
-      };
-      session.messages.push(botMsg);
-      return { reply, session };
-    } else if (lowerText.includes('#negar') || lowerText === 'negar' || lowerText === 'rechazar' || lowerText === '2' || lowerText === 'no') {
-      const reply = `❌ Has rechazado los términos de privacidad. De acuerdo con las normas de confidencialidad, no podemos procesar tu información. Si cambias de opinión, escribe *#aceptar* en cualquier momento.`;
-      const botMsg: ChatMessage = {
-        id: `bot-${Date.now()}`,
-        sender: 'bot',
-        text: reply,
-        timestamp: Date.now(),
-      };
-      session.messages.push(botMsg);
-      return { reply, session };
-    } else {
-      const reply = `⚠️ Para poder conversar con nosotros en SubaTECH / Psybot, por favor responde primero escribiendo **#aceptar** o **#negar** a nuestros Términos y Política de Privacidad.`;
-      const botMsg: ChatMessage = {
-        id: `bot-${Date.now()}`,
-        sender: 'bot',
-        text: reply,
-        timestamp: Date.now(),
-      };
-      session.messages.push(botMsg);
-      return { reply, session };
-    }
+  if (lowerText.includes('#aceptar') || lowerText === 'aceptar') {
+    session.termsAccepted = true;
+    const reply = `✅ *¡Acompañamiento Habilitado!* Gracias por comunicarte con SubaTECH Salud Mental / Psybot. Estoy aquí para escucharte y orientarte. ¿Cómo te sientes en este momento? (Recuerda que si deseas un psicólogo humano puedes escribir *#psicologo*).`;
+    const botMsg: ChatMessage = {
+      id: `bot-${Date.now()}`,
+      sender: 'bot',
+      text: reply,
+      timestamp: Date.now(),
+    };
+    session.messages.push(botMsg);
+    return { reply, session };
   }
 
   session.lastActivityAt = now;
@@ -724,15 +699,27 @@ Un terapeuta humano examinará tu caso y se comunicará directamente contigo en 
 // API ROUTES
 // -------------------------------------------------------------
 
-// Real Twilio Webhook (POST /api/whatsapp)
-app.post('/api/whatsapp', async (req, res) => {
+// Webhook Controller handling Twilio incoming messages across multiple URL paths
+const handleTwilioWebhook = async (req: express.Request, res: express.Response) => {
   try {
-    const fromNumber = req.body.From || req.body.from || 'whatsapp:+10000000000';
-    const bodyText = req.body.Body || req.body.text || req.body.body || '';
-    const profileName = req.body.ProfileName || req.body.profileName || '';
-    const isJsonRequested = req.headers.accept?.includes('application/json') || req.body.isSimulator;
+    const params = req.method === 'GET' ? req.query : req.body;
+    const fromNumber = params.From || params.from || 'whatsapp:+10000000000';
+    const bodyText = params.Body || params.text || params.body || '';
+    const profileName = params.ProfileName || params.profileName || '';
+    const isJsonRequested = req.headers.accept?.includes('application/json') || params.isSimulator;
 
-    const result = await processIncomingWhatsAppMessage(fromNumber, bodyText, profileName);
+    if (!bodyText && req.method === 'GET') {
+      // Diagnostic check for webhook ping
+      return res.status(200).json({ 
+        status: 'active', 
+        service: 'Psybot SubaTECH Twilio WhatsApp Webhook', 
+        ready: true,
+        endpoint: req.originalUrl,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    const result = await processIncomingWhatsAppMessage(String(fromNumber), String(bodyText), String(profileName));
 
     if (isJsonRequested) {
       return res.json({
@@ -743,18 +730,38 @@ app.post('/api/whatsapp', async (req, res) => {
       });
     }
 
-    // Return TwiML XML to Twilio
+    // Return strict, clean TwiML XML to Twilio with proper Content-Type header
+    const cleanEscapedBody = escapeXml(result.reply);
     const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Message>${result.reply.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</Message>
+    <Message>
+        <Body>${cleanEscapedBody}</Body>
+    </Message>
 </Response>`;
 
-    res.setHeader('Content-Type', 'text/xml');
+    res.type('text/xml; charset=utf-8');
     return res.status(200).send(twimlResponse);
   } catch (error: any) {
     console.error('Error processing WhatsApp webhook:', error);
-    res.status(500).json({ error: error.message || 'Internal error' });
+    if (req.headers.accept?.includes('application/json')) {
+      return res.status(500).json({ error: error.message || 'Internal error' });
+    }
+    const errorTwiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Message>
+        <Body>Lo sentimos, ocurrió un error momentáneo procesando tu mensaje. Por favor intenta de nuevo.</Body>
+    </Message>
+</Response>`;
+    res.type('text/xml; charset=utf-8');
+    return res.status(200).send(errorTwiml);
   }
+};
+
+// Register webhook handler across all standard Twilio paths
+const WEBHOOK_PATHS = ['/api/whatsapp', '/api/twilio/webhook', '/api/twilio', '/webhook', '/twilio', '/whatsapp'];
+WEBHOOK_PATHS.forEach(path => {
+  app.post(path, handleTwilioWebhook);
+  app.get(path, handleTwilioWebhook);
 });
 
 // GET all sessions
