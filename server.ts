@@ -40,6 +40,84 @@ const ai = new GoogleGenAI({
   },
 });
 
+// Environment Variable Runtime Validator
+interface EnvValidationReport {
+  isValid: boolean;
+  missingVars: string[];
+  twilio: {
+    accountSidConfigured: boolean;
+    authTokenConfigured: boolean;
+    whatsappNumberConfigured: boolean;
+  };
+  gemini: {
+    apiKeyConfigured: boolean;
+  };
+}
+
+function validateEnvironmentVariables(): EnvValidationReport {
+  const missingVars: string[] = [];
+
+  const rawAccountSid = process.env.TWILIO_ACCOUNT_SID;
+  const rawAuthToken = process.env.TWILIO_AUTH_TOKEN;
+  const rawWhatsappNumber = process.env.TWILIO_WHATSAPP_NUMBER;
+  const rawGeminiKey = process.env.GEMINI_API_KEY;
+
+  if (!rawAccountSid || !rawAccountSid.trim()) {
+    missingVars.push('TWILIO_ACCOUNT_SID');
+  }
+  if (!rawAuthToken || !rawAuthToken.trim()) {
+    missingVars.push('TWILIO_AUTH_TOKEN');
+  }
+  if (!rawWhatsappNumber || !rawWhatsappNumber.trim()) {
+    missingVars.push('TWILIO_WHATSAPP_NUMBER');
+  }
+
+  // Visual terminal banner for runtime diagnostic
+  if (missingVars.length > 0) {
+    console.warn('\n' + '='.repeat(70));
+    console.warn('⚠️  [ENV CONFIG WARNING] Missing Twilio Environment Variables:');
+    missingVars.forEach((v) => {
+      console.warn(`   ❌ ${v} is undefined or empty in process.env`);
+    });
+    console.warn('----------------------------------------------------------------------');
+    console.warn('💡 IMPACT:');
+    if (missingVars.includes('TWILIO_ACCOUNT_SID') || missingVars.includes('TWILIO_AUTH_TOKEN')) {
+      console.warn('   • Outbound messages from psychologists to WhatsApp will fail (401 / 400).');
+      console.warn('   • Automatic sync polling from Twilio REST API will be disabled.');
+    }
+    if (missingVars.includes('TWILIO_WHATSAPP_NUMBER')) {
+      console.warn('   • Inbound WhatsApp messages will default to Sandbox number whatsapp:+14155238886.');
+    }
+    console.warn('👉 FIX: Define these variables in your Railway / Cloud hosting dashboard.');
+    console.warn('='.repeat(70) + '\n');
+  } else {
+    console.log('✅ [ENV CONFIG] All Twilio environment variables loaded successfully:');
+    console.log(`   • TWILIO_ACCOUNT_SID: ${rawAccountSid?.substring(0, 6)}... (Length: ${rawAccountSid?.length})`);
+    console.log(`   • TWILIO_AUTH_TOKEN: ${rawAuthToken ? '****** (configured)' : 'undefined'}`);
+    console.log(`   • TWILIO_WHATSAPP_NUMBER: ${rawWhatsappNumber}`);
+  }
+
+  if (!rawGeminiKey || !rawGeminiKey.trim()) {
+    console.warn('⚠️  [ENV CONFIG WARNING] GEMINI_API_KEY is undefined. AI will use local deterministic clinical triage fallback.');
+  }
+
+  return {
+    isValid: missingVars.length === 0,
+    missingVars,
+    twilio: {
+      accountSidConfigured: Boolean(rawAccountSid && rawAccountSid.trim()),
+      authTokenConfigured: Boolean(rawAuthToken && rawAuthToken.trim()),
+      whatsappNumberConfigured: Boolean(rawWhatsappNumber && rawWhatsappNumber.trim()),
+    },
+    gemini: {
+      apiKeyConfigured: Boolean(rawGeminiKey && rawGeminiKey.trim()),
+    },
+  };
+}
+
+// Run validation immediately at startup
+const initialEnvReport = validateEnvironmentVariables();
+
 // Twilio WhatsApp credentials
 const TWILIO_CONFIG = {
   accountSid: process.env.TWILIO_ACCOUNT_SID || 'ACe13be538d71e3ac31fd56bbdf7d86902',
@@ -47,20 +125,21 @@ const TWILIO_CONFIG = {
   whatsappNumber: process.env.TWILIO_WHATSAPP_NUMBER || 'whatsapp:+14155238886',
 };
 
-// Helper: Sanitize phone numbers for Twilio WhatsApp format (e.g. +573107956907 -> whatsapp:+573107956907, whatsapp:CO.2689113694823723)
-function sanitizeWhatsAppNumber(rawPhone: string): string {
+// Helper: Sanitize and validate phone numbers for Twilio WhatsApp format (e.g. +573107956907 -> whatsapp:+573107956907)
+function sanitizeWhatsAppNumber(rawPhone: string): string | null {
+  if (!rawPhone || typeof rawPhone !== 'string') return null;
   let cleaned = rawPhone.trim();
   if (cleaned.toLowerCase().startsWith('whatsapp:')) {
     cleaned = cleaned.substring(9).trim();
   }
-  // If it's a Twilio channel alphanumeric identifier like CO.2689113694823723
-  if (/^[A-Z]{2}\.\d+/i.test(cleaned)) {
-    return `whatsapp:${cleaned}`;
-  }
-  // Remove spaces, hyphens, parentheses, and dots for regular numbers
+  // Strip spaces, dashes, dots, parentheses
   cleaned = cleaned.replace(/[\s\-\(\)\.]/g, '');
   if (!cleaned.startsWith('+')) {
     cleaned = `+${cleaned}`;
+  }
+  // Standard E.164 verification: must start with + followed by 7 to 15 digits
+  if (!/^\+[1-9]\d{6,14}$/.test(cleaned)) {
+    return null;
   }
   return `whatsapp:${cleaned}`;
 }
@@ -293,15 +372,28 @@ setInterval(syncTwilioInboundMessages, 2500);
 async function sendTwilioWhatsAppMessage(
   toPhoneNumber: string, 
   messageBody: string
-): Promise<{ success: boolean; sid?: string; error?: string }> {
+): Promise<{ success: boolean; sid?: string; error?: string; errorCode?: number; isSimulated?: boolean }> {
+  // Validate recipient phone format
+  const formattedTo = sanitizeWhatsAppNumber(toPhoneNumber);
+
+  // If not a valid international E.164 phone number (e.g. simulated session, internal ID like CO.xxx), handle locally without throwing Twilio channel errors
+  if (!formattedTo) {
+    console.log(`[Twilio Bypass] Skipping Twilio REST API for non-phone session "${toPhoneNumber}". Processed locally.`);
+    return { 
+      success: true, 
+      sid: `sim-local-${Date.now()}`,
+      isSimulated: true 
+    };
+  }
+
   const { accountSid, authToken, whatsappNumber } = TWILIO_CONFIG;
   if (!accountSid || !authToken || !whatsappNumber) {
     console.warn('[Twilio] Missing Twilio credentials, skipping outbound WhatsApp API dispatch.');
-    return { success: false, error: 'Credenciales de Twilio incompletas en el servidor.' };
+    return { 
+      success: false, 
+      error: 'Credenciales de Twilio incompletas en el servidor. Configura TWILIO_ACCOUNT_SID y TWILIO_AUTH_TOKEN en Railway.' 
+    };
   }
-
-  // Ensure recipient phone is strictly sanitized E.164 with whatsapp: prefix
-  const formattedTo = sanitizeWhatsAppNumber(toPhoneNumber);
 
   try {
     const authString = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
@@ -323,12 +415,22 @@ async function sendTwilioWhatsAppMessage(
     if (!response.ok) {
       const errText = await response.text();
       let parsedMessage = errText;
+      let errorCode: number | undefined;
       try {
         const parsed = JSON.parse(errText);
-        parsedMessage = parsed.message || errText;
+        errorCode = parsed.code;
+        if (parsed.code === 20003) {
+          parsedMessage = 'Twilio Error 20003 (401 Unauthorized): El TWILIO_AUTH_TOKEN configurado en Railway es inválido o expiró. Actualízalo en Railway.';
+        } else if (parsed.code === 21608) {
+          parsedMessage = `Twilio Error 21608: El número ${formattedTo} aún no se ha unido a tu Sandbox de WhatsApp. Envía el comando "join <sandbox>" a ${whatsappNumber}.`;
+        } else if (parsed.code === 63016) {
+          parsedMessage = 'Twilio Error 63016: La ventana de 24 horas de WhatsApp cerró. El paciente debe enviar un mensaje nuevo antes de poder responderle.';
+        } else {
+          parsedMessage = parsed.message || errText;
+        }
       } catch {}
-      console.error('[Twilio] Error sending message via REST API:', response.status, errText);
-      return { success: false, error: parsedMessage };
+      console.error(`[Twilio Error ${response.status}] No se pudo enviar WhatsApp a ${formattedTo}:`, parsedMessage);
+      return { success: false, error: parsedMessage, errorCode };
     }
 
     const data: any = await response.json();
@@ -710,17 +812,60 @@ Un terapeuta humano examinará tu caso y se comunicará directamente contigo en 
 // API ROUTES
 // -------------------------------------------------------------
 
+// Webhook Activity Logger to debug Twilio incoming POST requests in real-time
+interface WebhookLogEntry {
+  id: string;
+  timestamp: string;
+  method: string;
+  path: string;
+  ip: string;
+  from: string;
+  body: string;
+  userAgent: string;
+  status: number;
+  replySnippet: string;
+}
+const webhookLogs: WebhookLogEntry[] = [];
+
+function recordWebhookLog(entry: Omit<WebhookLogEntry, 'id' | 'timestamp'>) {
+  webhookLogs.unshift({
+    id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    timestamp: new Date().toISOString(),
+    ...entry,
+  });
+  if (webhookLogs.length > 50) {
+    webhookLogs.pop();
+  }
+}
+
 // Webhook Controller handling Twilio incoming messages across multiple URL paths
 const handleTwilioWebhook = async (req: express.Request, res: express.Response) => {
-  try {
-    const params = req.method === 'GET' ? req.query : req.body;
-    const fromNumber = params.From || params.from || 'whatsapp:+10000000000';
-    const bodyText = params.Body || params.text || params.body || '';
-    const profileName = params.ProfileName || params.profileName || '';
-    const isJsonRequested = req.headers.accept?.includes('application/json') || params.isSimulator;
+  const method = req.method;
+  const path = req.originalUrl;
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const userAgent = String(req.headers['user-agent'] || '');
+  const params = method === 'GET' ? req.query : req.body;
+  const fromNumber = params.From || params.from || '';
+  const bodyText = params.Body || params.text || params.body || '';
+  const profileName = params.ProfileName || params.profileName || '';
+  const isJsonRequested = req.headers.accept?.includes('application/json') || params.isSimulator;
 
-    if (!bodyText && req.method === 'GET') {
+  console.log(`[Twilio Webhook] ${method} ${path} - From: "${fromNumber}", Body: "${bodyText}", IP: ${ip}`);
+
+  try {
+    if (!bodyText && method === 'GET') {
       // Diagnostic check for webhook ping
+      recordWebhookLog({
+        method,
+        path,
+        ip,
+        from: String(fromNumber || 'N/A'),
+        body: '(GET ping / healthcheck)',
+        userAgent,
+        status: 200,
+        replySnippet: 'Webhook endpoint active'
+      });
+
       return res.status(200).json({ 
         status: 'active', 
         service: 'Psybot SubaTECH Twilio WhatsApp Webhook', 
@@ -730,7 +875,19 @@ const handleTwilioWebhook = async (req: express.Request, res: express.Response) 
       });
     }
 
-    const result = await processIncomingWhatsAppMessage(String(fromNumber), String(bodyText), String(profileName));
+    const safeFrom = String(fromNumber || 'whatsapp:+10000000000');
+    const result = await processIncomingWhatsAppMessage(safeFrom, String(bodyText), String(profileName));
+
+    recordWebhookLog({
+      method,
+      path,
+      ip,
+      from: safeFrom,
+      body: String(bodyText),
+      userAgent,
+      status: 200,
+      replySnippet: result.reply.substring(0, 100)
+    });
 
     if (isJsonRequested) {
       return res.json({
@@ -754,6 +911,17 @@ const handleTwilioWebhook = async (req: express.Request, res: express.Response) 
     return res.status(200).send(twimlResponse);
   } catch (error: any) {
     console.error('Error processing WhatsApp webhook:', error);
+    recordWebhookLog({
+      method,
+      path,
+      ip,
+      from: String(fromNumber),
+      body: String(bodyText),
+      userAgent,
+      status: 500,
+      replySnippet: `Error: ${error.message || 'Internal error'}`
+    });
+
     if (req.headers.accept?.includes('application/json')) {
       return res.status(500).json({ error: error.message || 'Internal error' });
     }
@@ -773,6 +941,16 @@ const WEBHOOK_PATHS = ['/api/whatsapp', '/api/twilio/webhook', '/api/twilio', '/
 WEBHOOK_PATHS.forEach(path => {
   app.post(path, handleTwilioWebhook);
   app.get(path, handleTwilioWebhook);
+});
+
+// Endpoint to view incoming webhook activity logs
+app.get('/api/twilio/logs', (_req, res) => {
+  res.json({
+    totalLogs: webhookLogs.length,
+    logs: webhookLogs,
+    activeWebhookPaths: WEBHOOK_PATHS,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // GET all sessions
@@ -828,22 +1006,58 @@ app.post('/api/sessions/message', async (req, res) => {
   }
 
   const senderName = psychologistName || session.assignedPsychologistName || 'Psicólogo Especialista';
+  
+  // Send directly to the patient's phone on WhatsApp
+  const outboundText = `🩺 *${senderName}*:\n${text}`;
+  const sendResult = await sendTwilioWhatsAppMessage(session.id, outboundText);
+
   const newMsg: ChatMessage = {
     id: `psy-${Date.now()}`,
     sender: 'psychologist',
     psychologistName: senderName,
     text,
     timestamp: Date.now(),
+    deliveryStatus: sendResult.success ? 'delivered' : 'failed',
+    deliveryError: sendResult.success ? undefined : sendResult.error,
   };
 
   session.messages.push(newMsg);
   session.lastActivityAt = Date.now();
 
-  // Send directly to the patient's phone on WhatsApp
-  const outboundText = `🩺 *${senderName}*:\n${text}`;
-  await sendTwilioWhatsAppMessage(session.id, outboundText);
+  res.json({ 
+    success: true, 
+    session, 
+    message: newMsg,
+    twilioDelivery: sendResult 
+  });
+});
 
-  res.json({ success: true, session, message: newMsg });
+// GET / POST Twilio Config Diagnostic Route
+app.get('/api/twilio/config', (_req, res) => {
+  res.json({
+    accountSid: TWILIO_CONFIG.accountSid,
+    whatsappNumber: TWILIO_CONFIG.whatsappNumber,
+    hasAuthToken: Boolean(TWILIO_CONFIG.authToken),
+    webhookUrl: '/api/whatsapp',
+  });
+});
+
+app.post('/api/twilio/config', (req, res) => {
+  const { accountSid, authToken, whatsappNumber } = req.body;
+  if (accountSid) TWILIO_CONFIG.accountSid = accountSid.trim();
+  if (authToken) TWILIO_CONFIG.authToken = authToken.trim();
+  if (whatsappNumber) {
+    const formatted = sanitizeWhatsAppNumber(whatsappNumber);
+    TWILIO_CONFIG.whatsappNumber = formatted || whatsappNumber.trim();
+  }
+
+  res.json({
+    success: true,
+    message: 'Credenciales de Twilio actualizadas en memoria.',
+    accountSid: TWILIO_CONFIG.accountSid,
+    whatsappNumber: TWILIO_CONFIG.whatsappNumber,
+    hasAuthToken: Boolean(TWILIO_CONFIG.authToken),
+  });
 });
 
 // POST transfer session back to AI or release to queue
@@ -1073,10 +1287,13 @@ app.post('/api/simulate/reset', (req, res) => {
 
 // Status & diagnostics
 app.get('/api/health', (req, res) => {
+  const envStatus = validateEnvironmentVariables();
   res.json({
     status: 'online',
     sessionsCount: sessions.size,
     geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
+    twilioConfigured: envStatus.isValid,
+    envValidation: envStatus,
     twilioWebhookUrl: '/api/whatsapp',
     twilioAccountSid: TWILIO_CONFIG.accountSid,
     twilioWhatsappNumber: TWILIO_CONFIG.whatsappNumber,
@@ -1112,6 +1329,12 @@ app.post('/api/twilio/test', async (req, res) => {
   }
 
   const sanitized = sanitizeWhatsAppNumber(toPhone);
+  if (!sanitized) {
+    return res.status(400).json({ 
+      error: 'Número de teléfono inválido. Debe estar en formato internacional E.164 con código de país (ejemplo: +573001234567 o whatsapp:+573001234567).' 
+    });
+  }
+
   const messageText = testMessage || '🟢 MindBridge: Prueba de conexión exitosa con Twilio WhatsApp API.';
   const result = await sendTwilioWhatsAppMessage(sanitized, messageText);
 

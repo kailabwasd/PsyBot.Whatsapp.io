@@ -17,6 +17,8 @@ export interface ChatMessage {
   psychologistName?: string;
   isCrisisTrigger?: boolean;
   quickReplies?: string[];
+  deliveryStatus?: 'sending' | 'delivered' | 'failed';
+  deliveryError?: string;
 }
 
 export interface PatientSession {

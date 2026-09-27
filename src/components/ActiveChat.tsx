@@ -338,6 +338,23 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
                   </div>
 
                   <p className="whitespace-pre-wrap">{msg.text}</p>
+
+                  {/* Delivery Status Indicator for Psychologist Messages */}
+                  {isPsychologist && (
+                    <div className="mt-1 flex items-center justify-end gap-1 text-[10px]">
+                      {msg.deliveryStatus === 'failed' ? (
+                        <div className="flex items-center gap-1 text-red-200 bg-red-950/80 px-1.5 py-0.5 rounded border border-red-500/40 text-[9px]" title={msg.deliveryError || 'Error de entrega en Twilio'}>
+                          <AlertTriangle className="w-2.5 h-2.5 text-red-400 shrink-0" />
+                          <span className="truncate max-w-[180px]">{msg.deliveryError || 'No entregado'}</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-0.5 text-teal-200/90 text-[10px]">
+                          <CheckCircle className="w-3 h-3 text-emerald-300" />
+                          <span>WhatsApp</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             );
