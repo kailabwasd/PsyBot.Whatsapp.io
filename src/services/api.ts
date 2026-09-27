@@ -1,8 +1,42 @@
 import type { PatientSession, RiskLevel } from '../types/index.ts';
 
+export const DEFAULT_PRODUCTION_BACKEND_URL = 'https://psybot-whatsapp-production.up.railway.app';
+
+export function getApiBaseUrl(): string {
+  // 1. Custom URL configured by user in settings
+  const customUrl = localStorage.getItem('subatech_backend_api_url');
+  if (customUrl && customUrl.trim().length > 0) {
+    return customUrl.trim().replace(/\/+$/, '');
+  }
+
+  // 2. Vite environment variable
+  const envUrl = (import.meta as any).env?.VITE_BACKEND_URL;
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim().length > 0) {
+    return envUrl.trim().replace(/\/+$/, '');
+  }
+
+  // 3. When deployed on GitHub Pages, automatically route to live Railway backend
+  if (typeof window !== 'undefined' && window.location.hostname.includes('github.io')) {
+    return DEFAULT_PRODUCTION_BACKEND_URL;
+  }
+
+  // 4. Fallback to same-origin relative path
+  return '';
+}
+
+export function setApiBaseUrl(url: string): void {
+  const clean = url.trim().replace(/\/+$/, '');
+  if (clean) {
+    localStorage.setItem('subatech_backend_api_url', clean);
+  } else {
+    localStorage.removeItem('subatech_backend_api_url');
+  }
+}
+
 export async function fetchSessions(): Promise<PatientSession[]> {
   try {
-    const res = await fetch('/api/sessions', {
+    const base = getApiBaseUrl();
+    const res = await fetch(`${base}/api/sessions`, {
       headers: {
         'Accept': 'application/json',
       },
@@ -10,7 +44,6 @@ export async function fetchSessions(): Promise<PatientSession[]> {
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch sessions`);
     const contentType = res.headers.get('content-type') || '';
     if (!contentType.includes('application/json')) {
-      // Server returned HTML (e.g. while booting or during dev server proxy transition)
       return [];
     }
     const data = await res.json();
@@ -26,7 +59,8 @@ export async function sendWhatsAppWebhookMessage(
   bodyText: string,
   profileName?: string
 ): Promise<{ success: boolean; reply: string; session: PatientSession; quickReplies?: string[] }> {
-  const res = await fetch('/api/whatsapp', {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/whatsapp`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -48,7 +82,8 @@ export async function claimSession(
   psychologistId: string,
   psychologistName: string
 ): Promise<PatientSession> {
-  const res = await fetch('/api/sessions/claim', {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/sessions/claim`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sessionId, psychologistId, psychologistName }),
@@ -63,7 +98,8 @@ export async function sendPsychologistMessage(
   text: string,
   psychologistName: string
 ): Promise<PatientSession> {
-  const res = await fetch('/api/sessions/message', {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/sessions/message`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sessionId, text, psychologistName }),
@@ -77,7 +113,8 @@ export async function transferSession(
   sessionId: string,
   target: 'AI_MODE' | 'WAITING_PSYCHOLOGIST'
 ): Promise<PatientSession> {
-  const res = await fetch('/api/sessions/transfer', {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/sessions/transfer`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sessionId, target }),
@@ -96,7 +133,8 @@ export async function saveClinicalNotes(
     diagnosticImpressions?: string[];
   }
 ): Promise<PatientSession> {
-  const res = await fetch('/api/sessions/notes', {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/sessions/notes`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sessionId, ...data }),
@@ -110,7 +148,8 @@ export async function closeSession(
   sessionId: string,
   resolutionNotes: string
 ): Promise<PatientSession> {
-  const res = await fetch('/api/sessions/close', {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/sessions/close`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sessionId, resolutionNotes }),
@@ -121,7 +160,8 @@ export async function closeSession(
 }
 
 export async function simulateScenario(scenarioType: 'CRISIS' | 'PANIC' | 'ANXIETY'): Promise<PatientSession> {
-  const res = await fetch('/api/simulate/scenario', {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/simulate/scenario`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ scenarioType }),
@@ -132,12 +172,14 @@ export async function simulateScenario(scenarioType: 'CRISIS' | 'PANIC' | 'ANXIE
 }
 
 export async function resetSimulation(): Promise<void> {
-  const res = await fetch('/api/simulate/reset', { method: 'POST' });
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/simulate/reset`, { method: 'POST' });
   if (!res.ok) throw new Error('Failed to reset simulation');
 }
 
 export async function checkHealth(): Promise<{ status: string; geminiConfigured: boolean; sessionsCount: number }> {
-  const res = await fetch('/api/health');
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/health`);
   if (!res.ok) throw new Error('Health check failed');
   return res.json();
 }
