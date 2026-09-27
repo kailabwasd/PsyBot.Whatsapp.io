@@ -1247,6 +1247,53 @@ app.post('/api/twilio/config', (req, res) => {
   });
 });
 
+// POST test sending WhatsApp message via Twilio REST API
+app.post('/api/twilio/test', async (req, res) => {
+  const { toPhone, phoneNumber, testMessage, accountSid, authToken, whatsappNumber } = req.body;
+  const target = toPhone || phoneNumber;
+  
+  if (!target) {
+    return res.status(400).json({ 
+      success: false, 
+      error: 'Debes proporcionar un número de teléfono destino en formato E.164 (ej. +573107956907).' 
+    });
+  }
+
+  // Update in-memory credentials if passed in the test request
+  if (accountSid) TWILIO_CONFIG.accountSid = accountSid.trim();
+  if (authToken) TWILIO_CONFIG.authToken = authToken.trim();
+  if (whatsappNumber) {
+    const formatted = sanitizeWhatsAppNumber(whatsappNumber);
+    TWILIO_CONFIG.whatsappNumber = formatted || whatsappNumber.trim();
+  }
+
+  const messageText = testMessage || '🟢 ¡Conexión con Psybot SubaTECH confirmada! Tu WhatsApp está vinculado exitosamente con la Guardia de Salud Mental 24/7.';
+  
+  console.log(`[Twilio Test] Testing outbound dispatch to ${target}...`);
+  const result = await sendTwilioWhatsAppMessage(target, messageText);
+
+  if (result.success) {
+    return res.json({
+      success: true,
+      message: 'Mensaje de prueba enviado exitosamente a WhatsApp.',
+      sid: result.sid,
+      targetPhone: target,
+    });
+  } else {
+    return res.status(400).json({
+      success: false,
+      error: result.error || 'Error al despachar el mensaje por Twilio.',
+      errorCode: result.errorCode,
+      targetPhone: target,
+      suggestion: result.errorCode === 20003 
+        ? 'El Auth Token en tu servidor no coincide con el de tu consola de Twilio. Revisa tu consola Twilio y actualiza la variable TWILIO_AUTH_TOKEN en Railway.'
+        : result.errorCode === 21608 
+        ? 'El número aún no se ha unido al Sandbox de Twilio. Envía "join limited-burn" por WhatsApp al +1 415 523 8886 primero.' 
+        : undefined
+    });
+  }
+});
+
 // POST transfer session back to AI or release to queue
 app.post('/api/sessions/transfer', (req, res) => {
   const { sessionId, target } = req.body; // 'AI_MODE' | 'WAITING_PSYCHOLOGIST'
