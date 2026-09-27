@@ -839,23 +839,18 @@ Un terapeuta humano examinará tu caso y se comunicará directamente contigo en 
   // If already waiting for psychologist in the queue
   if (session.state === 'WAITING_PSYCHOLOGIST') {
     session.triageSummary = session.triageSummary 
-      ? `${session.triageSummary} | Mensaje: "${text.substring(0, 80)}"` 
+      ? `${session.triageSummary} | Contexto: "${text.substring(0, 80)}"` 
       : `Motivo: "${text.substring(0, 120)}"`;
-    const reply = `Mensaje recibido${session.userName ? `, *${session.userName}*` : ''}. Tu ficha está en la cola activa de guardia. Un psicólogo humano tomará tu chat en breve. Por favor mantente atento aquí.`;
-    const botMsg: ChatMessage = {
-      id: `bot-${Date.now()}`,
-      sender: 'bot',
-      text: reply,
-      timestamp: Date.now(),
-    };
-    session.messages.push(botMsg);
-    return { reply, session };
+    // Patient's message is already appended to history for the psychologist to read. Silent return.
+    return { reply: '', session };
   }
 
   // If in human mode (psychologist is actively in session)
+  // We do NOT send any auto-reply text like "(Mensaje entregado al psicólogo)".
+  // The psychologist will reply directly from their clinical chat panel in real time.
   if (session.state === 'HUMAN_MODE') {
     return {
-      reply: '*(Mensaje entregado al psicólogo)*',
+      reply: '',
       session,
     };
   }
@@ -1001,6 +996,12 @@ const handleTwilioWebhook = async (req: express.Request, res: express.Response) 
         session: result.session,
         quickReplies: result.quickReplies,
       });
+    }
+
+    // If reply is empty (e.g. in HUMAN_MODE or queue context), return empty TwiML without auto-messaging
+    if (!result.reply || result.reply.trim() === '') {
+      res.type('text/xml; charset=utf-8');
+      return res.status(200).send('<?xml version="1.0" encoding="UTF-8"?>\n<Response/>');
     }
 
     // Return strict, clean TwiML XML to Twilio with proper Content-Type header
