@@ -1,6 +1,7 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
@@ -14,6 +15,26 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = '0.0.0.0';
+
+// Ensure logs directory and diagnostic log file exist
+const LOGS_DIR = path.join(__dirname, 'logs');
+const DIAGNOSTIC_LOG_FILE = path.join(LOGS_DIR, 'twilio-diagnostic.log');
+try {
+  if (!fs.existsSync(LOGS_DIR)) {
+    fs.mkdirSync(LOGS_DIR, { recursive: true });
+  }
+} catch (e) {
+  console.warn('Could not create logs directory:', e);
+}
+
+function appendDiagnosticLog(entry: string) {
+  try {
+    const timestampedLine = `[${new Date().toISOString()}] ${entry}\n`;
+    fs.appendFileSync(DIAGNOSTIC_LOG_FILE, timestampedLine, { encoding: 'utf-8' });
+  } catch (err) {
+    console.error('Failed to write to twilio-diagnostic.log:', err);
+  }
+}
 
 // CORS middleware for cross-domain requests (e.g. GitHub Pages frontend -> Railway backend)
 app.use((req, res, next) => {
@@ -99,9 +120,18 @@ function runStartupDiagnostics(strictMode: boolean = false): StartupDiagnosticRe
   console.log(`• GEMINI_API_KEY:         ${rawGeminiKey ? '****** (CONFIGURED)' : '⚠️ MISSING (Using clinical triage fallback)'}`);
   console.log('─'.repeat(75));
 
+  appendDiagnosticLog(`=== SERVER STARTUP DIAGNOSTIC ===`);
+  appendDiagnosticLog(`TWILIO_ACCOUNT_SID: ${rawAccountSid ? `${rawAccountSid.substring(0, 6)}... (Valid: ${isAccountSidValid})` : 'MISSING'}`);
+  appendDiagnosticLog(`TWILIO_AUTH_TOKEN: ${rawAuthToken ? `Configured (Length: ${rawAuthToken.length})` : 'MISSING'}`);
+  appendDiagnosticLog(`TWILIO_WHATSAPP_NUMBER: ${rawWhatsappNumber || 'MISSING'} (Valid: ${isWhatsappNumberValid})`);
+  appendDiagnosticLog(`GEMINI_API_KEY: ${rawGeminiKey ? 'Configured' : 'MISSING'}`);
+
   if (errors.length > 0) {
     console.warn(`⚠️  Diagnostics detected ${errors.length} configuration issue(s):`);
-    errors.forEach(err => console.warn(`   ❌ ${err}`));
+    errors.forEach(err => {
+      console.warn(`   ❌ ${err}`);
+      appendDiagnosticLog(`CONFIG_ERROR: ${err}`);
+    });
     console.warn('─'.repeat(75));
     console.warn('👉 Please configure these environment variables in your Railway or host dashboard.');
 
@@ -112,6 +142,7 @@ function runStartupDiagnostics(strictMode: boolean = false): StartupDiagnosticRe
     }
   } else {
     console.log('✅ ALL REQUIRED TWILIO AND RUNTIME ENVIRONMENT VARIABLES LOADED CORRECTLY.');
+    appendDiagnosticLog(`STARTUP_STATUS: ALL REQUIRED ENVIRONMENT VARIABLES VERIFIED AND VALID.`);
   }
   console.log('═'.repeat(75) + '\n');
 
@@ -155,7 +186,7 @@ function validateEnvironmentVariables() {
 // Twilio WhatsApp credentials
 const TWILIO_CONFIG = {
   accountSid: process.env.TWILIO_ACCOUNT_SID || 'ACe13be538d71e3ac31fd56bbdf7d86902',
-  authToken: process.env.TWILIO_AUTH_TOKEN || '3704d719cbd4f6f2ed450356147b607e',
+  authToken: process.env.TWILIO_AUTH_TOKEN || '16c6e19e2aefea46ff4104cdb5077eb5',
   whatsappNumber: process.env.TWILIO_WHATSAPP_NUMBER || 'whatsapp:+14155238886',
 };
 
@@ -931,7 +962,15 @@ const handleTwilioWebhook = async (req: express.Request, res: express.Response) 
     }
 
     const safeFrom = String(fromNumber || 'whatsapp:+10000000000');
+    
+    // Explicit diagnostic log to disk file for incoming WhatsApp requests
+    appendDiagnosticLog(`[INCOMING_POST] Path: ${path} | IP: ${ip} | From: ${fromNumber} | To: ${toNumber} | Profile: ${profileName} | MessageSid: ${messageSid || 'N/A'}`);
+    appendDiagnosticLog(`[HEADERS] ${JSON.stringify(req.headers)}`);
+    appendDiagnosticLog(`[PAYLOAD_BODY] ${JSON.stringify(params)}`);
+
     const result = await processIncomingWhatsAppMessage(safeFrom, String(bodyText), String(profileName));
+
+    appendDiagnosticLog(`[RESPONSE_SUCCESS] Status: 200 | Reply: "${result.reply.substring(0, 80)}..." | Duration: ${Date.now() - startTime}ms`);
 
     recordWebhookLog({
       method,
@@ -977,6 +1016,7 @@ const handleTwilioWebhook = async (req: express.Request, res: express.Response) 
     return res.status(200).send(twimlResponse);
   } catch (error: any) {
     console.error('Error processing WhatsApp webhook:', error);
+    appendDiagnosticLog(`[WEBHOOK_ERROR] Path: ${path} | Error: ${error.message || error}`);
     recordWebhookLog({
       method,
       path,
@@ -1033,10 +1073,52 @@ app.get('/api/debug/logs', (_req, res) => {
   });
 });
 
+// Endpoint to view raw diagnostic log file directly from disk
+app.get('/api/debug/logs/file', (_req, res) => {
+  try {
+    if (fs.existsSync(DIAGNOSTIC_LOG_FILE)) {
+      const content = fs.readFileSync(DIAGNOSTIC_LOG_FILE, 'utf-8');
+      res.type('text/plain; charset=utf-8').send(content);
+    } else {
+      res.type('text/plain; charset=utf-8').send('No logs recorded yet in twilio-diagnostic.log');
+    }
+  } catch (err: any) {
+    res.status(500).send(`Error reading diagnostic log file: ${err?.message || err}`);
+  }
+});
+
+// Endpoint to verify all runtime environment variables
+app.get('/api/debug/env', (_req, res) => {
+  const currentCheck = runStartupDiagnostics(false);
+  res.json({
+    service: 'Psybot SubaTECH - Environment & Twilio Config Diagnostics',
+    timestamp: new Date().toISOString(),
+    processEnv: {
+      TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID ? `${process.env.TWILIO_ACCOUNT_SID.substring(0, 6)}... (Length: ${process.env.TWILIO_ACCOUNT_SID.length})` : 'NOT_SET',
+      TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN ? `****** (Length: ${process.env.TWILIO_AUTH_TOKEN.length})` : 'NOT_SET',
+      TWILIO_WHATSAPP_NUMBER: process.env.TWILIO_WHATSAPP_NUMBER || 'NOT_SET',
+      GEMINI_API_KEY: process.env.GEMINI_API_KEY ? 'CONFIGURED' : 'NOT_SET',
+      NODE_ENV: process.env.NODE_ENV || 'development',
+      PORT: PORT,
+    },
+    activeTwilioConfig: {
+      accountSid: `${TWILIO_CONFIG.accountSid.substring(0, 6)}... (Length: ${TWILIO_CONFIG.accountSid.length})`,
+      whatsappNumber: TWILIO_CONFIG.whatsappNumber,
+      hasAuthToken: Boolean(TWILIO_CONFIG.authToken),
+    },
+    diagnosticReport: currentCheck,
+  });
+});
+
 // Clear debug logs route
 app.post('/api/debug/logs/clear', (_req, res) => {
   webhookLogs.length = 0;
-  res.json({ success: true, message: 'Debug logs cleared.' });
+  try {
+    fs.writeFileSync(DIAGNOSTIC_LOG_FILE, `[${new Date().toISOString()}] Diagnostic log cleared by admin.\n`, { encoding: 'utf-8' });
+  } catch (e) {
+    console.warn('Could not reset log file:', e);
+  }
+  res.json({ success: true, message: 'Debug logs and diagnostic log file cleared.' });
 });
 
 // Alias for backwards compatibility
