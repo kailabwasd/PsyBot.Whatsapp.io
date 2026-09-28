@@ -16,9 +16,23 @@ import {
   Flame,
   AlertTriangle,
   Download,
-  BookOpen
+  BookOpen,
+  Smile,
+  Meh,
+  Frown,
+  BrainCircuit,
+  Info
 } from 'lucide-react';
 import type { PatientSession, PsychologistProfile, RiskLevel } from '../types/index.ts';
+
+interface PatientSentiment {
+  sentimentCategory: 'feliz' | 'neutra' | 'preocupada';
+  emotion: string;
+  intensity: string;
+  reason: string;
+  keyObservation?: string;
+  analyzedMessageId?: string;
+}
 
 interface ActiveChatProps {
   sessions: PatientSession[];
@@ -86,6 +100,12 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
   const [resolutionPromptOpen, setResolutionPromptOpen] = useState(false);
   const [resolutionNotes, setResolutionNotes] = useState('');
   const [copiedRecordLink, setCopiedRecordLink] = useState(false);
+  
+  // Gemini Patient Sentiment State
+  const [sentiment, setSentiment] = useState<PatientSentiment | null>(null);
+  const [isAnalyzingSentiment, setIsAnalyzingSentiment] = useState(false);
+  const [showSentimentDetail, setShowSentimentDetail] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Active cases claimed by this specialist or in human mode
@@ -94,6 +114,10 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
   );
 
   const currentSession = sessions.find((s) => s.id === activeSessionId) || activeCases[0] || null;
+
+  // Identify last user message
+  const userMessages = currentSession?.messages.filter((m) => m.sender === 'user') || [];
+  const lastUserMessage = userMessages[userMessages.length - 1];
 
   useEffect(() => {
     if (currentSession) {
@@ -104,6 +128,84 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [currentSession?.messages]);
+
+  // Analyze Sentiment with Gemini on latest patient message
+  useEffect(() => {
+    if (!lastUserMessage || !currentSession) {
+      setSentiment(null);
+      return;
+    }
+
+    if (sentiment?.analyzedMessageId === lastUserMessage.id) return;
+
+    let isMounted = true;
+    const fetchSentiment = async () => {
+      setIsAnalyzingSentiment(true);
+      try {
+        const res = await fetch('/api/gemini/sentiment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: lastUserMessage.text,
+            patientName: currentSession.userName,
+            previousMessages: currentSession.messages.slice(-5),
+          }),
+        });
+        const data = await res.json();
+        if (isMounted && data.success) {
+          setSentiment({
+            sentimentCategory: data.sentimentCategory,
+            emotion: data.emotion,
+            intensity: data.intensity,
+            reason: data.reason,
+            keyObservation: data.keyObservation,
+            analyzedMessageId: lastUserMessage.id,
+          });
+        }
+      } catch (err) {
+        console.warn('Could not analyze sentiment with Gemini:', err);
+      } finally {
+        if (isMounted) setIsAnalyzingSentiment(false);
+      }
+    };
+
+    fetchSentiment();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [lastUserMessage?.id, currentSession?.id]);
+
+  const handleManualReanalyzeSentiment = async () => {
+    if (!lastUserMessage || !currentSession || isAnalyzingSentiment) return;
+    setIsAnalyzingSentiment(true);
+    try {
+      const res = await fetch('/api/gemini/sentiment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: lastUserMessage.text,
+          patientName: currentSession.userName,
+          previousMessages: currentSession.messages.slice(-5),
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSentiment({
+          sentimentCategory: data.sentimentCategory,
+          emotion: data.emotion,
+          intensity: data.intensity,
+          reason: data.reason,
+          keyObservation: data.keyObservation,
+          analyzedMessageId: lastUserMessage.id,
+        });
+      }
+    } catch (err) {
+      console.warn('Manual sentiment analysis error:', err);
+    } finally {
+      setIsAnalyzingSentiment(false);
+    }
+  };
 
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -223,45 +325,128 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
       <div className="lg:col-span-6 bg-slate-900 rounded-2xl border border-slate-800 flex flex-col overflow-hidden shadow-xl">
         
         {/* Chat Header */}
-        <div className="p-4 border-b border-slate-800 bg-slate-850 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center font-bold text-white border border-slate-600">
-              {currentSession.userName.charAt(0) || 'P'}
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h4 className="text-sm font-bold text-white">
-                  {currentSession.userName}
-                </h4>
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="En línea vía WhatsApp"></span>
+        <div className="p-4 border-b border-slate-800 bg-slate-850 flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center font-bold text-white border border-slate-600">
+                {currentSession.userName.charAt(0) || 'P'}
               </div>
-              <p className="text-[11px] font-mono text-emerald-400 flex items-center gap-1">
-                <Phone className="w-3 h-3" />
-                {currentSession.phoneNumber}
-              </p>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-bold text-white">
+                    {currentSession.userName}
+                  </h4>
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="En línea vía WhatsApp"></span>
+                </div>
+                <p className="text-[11px] font-mono text-emerald-400 flex items-center gap-1">
+                  <Phone className="w-3 h-3" />
+                  {currentSession.phoneNumber}
+                </p>
+              </div>
+            </div>
+
+            {/* Quick Chat Actions */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => onTransfer(currentSession.id, 'AI_MODE')}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center gap-1.5 transition"
+                title="Transferir al Asistente Aura IA"
+              >
+                <ArrowRightLeft className="w-3.5 h-3.5 text-teal-400" />
+                <span className="hidden sm:inline">Transferir a IA</span>
+              </button>
+
+              <button
+                onClick={() => setResolutionPromptOpen(true)}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-emerald-300 hover:text-white bg-emerald-950/60 hover:bg-emerald-800 border border-emerald-500/40 flex items-center gap-1.5 transition"
+                title="Concluir atención y registrar diagnóstico"
+              >
+                <CheckCircle className="w-3.5 h-3.5" />
+                <span>Resolver Caso</span>
+              </button>
             </div>
           </div>
 
-          {/* Quick Chat Actions */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => onTransfer(currentSession.id, 'AI_MODE')}
-              className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center gap-1.5 transition"
-              title="Transferir al Asistente Aura IA"
-            >
-              <ArrowRightLeft className="w-3.5 h-3.5 text-teal-400" />
-              <span className="hidden sm:inline">Transferir a IA</span>
-            </button>
+          {/* Indicador Visual de Sentimiento Gemini en el Último Mensaje */}
+          <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-400 flex items-center gap-1 font-medium">
+                <BrainCircuit className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Sentimiento (Último Mensaje):</span>
+              </span>
 
-            <button
-              onClick={() => setResolutionPromptOpen(true)}
-              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-emerald-300 hover:text-white bg-emerald-950/60 hover:bg-emerald-800 border border-emerald-500/40 flex items-center gap-1.5 transition"
-              title="Concluir atención y registrar diagnóstico"
-            >
-              <CheckCircle className="w-3.5 h-3.5" />
-              <span>Resolver Caso</span>
-            </button>
+              {isAnalyzingSentiment ? (
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-cyan-950/40 border border-cyan-500/30 text-cyan-300 text-xs animate-pulse">
+                  <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                  <span>Analizando con Gemini...</span>
+                </div>
+              ) : sentiment ? (
+                <button
+                  type="button"
+                  onClick={() => setShowSentimentDetail(!showSentimentDetail)}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-bold transition cursor-pointer ${
+                    sentiment.sentimentCategory === 'feliz'
+                      ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25'
+                      : sentiment.sentimentCategory === 'preocupada'
+                      ? 'bg-amber-500/15 text-amber-300 border-amber-500/40 hover:bg-amber-500/25'
+                      : 'bg-sky-500/15 text-sky-300 border-sky-500/40 hover:bg-sky-500/25'
+                  }`}
+                  title="Haz clic para ver el análisis de Gemini"
+                >
+                  {sentiment.sentimentCategory === 'feliz' && <Smile className="w-4 h-4 text-emerald-400" />}
+                  {sentiment.sentimentCategory === 'neutra' && <Meh className="w-4 h-4 text-sky-400" />}
+                  {sentiment.sentimentCategory === 'preocupada' && <Frown className="w-4 h-4 text-amber-400" />}
+                  <span className="capitalize">
+                    {sentiment.sentimentCategory === 'feliz' ? 'Feliz' : sentiment.sentimentCategory === 'preocupada' ? 'Preocupada' : 'Neutra'}
+                  </span>
+                  <span className="text-[10px] opacity-75 font-normal">
+                    ({sentiment.emotion})
+                  </span>
+                  <Info className="w-3 h-3 opacity-60 ml-0.5" />
+                </button>
+              ) : (
+                <span className="text-[11px] text-slate-500 italic">
+                  Sin mensajes del paciente para analizar
+                </span>
+              )}
+            </div>
+
+            {sentiment && (
+              <button
+                type="button"
+                onClick={handleManualReanalyzeSentiment}
+                disabled={isAnalyzingSentiment}
+                className="text-[11px] text-slate-400 hover:text-cyan-300 flex items-center gap-1 transition disabled:opacity-50"
+                title="Volver a analizar con Gemini"
+              >
+                <RefreshCw className={`w-3 h-3 ${isAnalyzingSentiment ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">Re-analizar Gemini</span>
+              </button>
+            )}
           </div>
+
+          {/* Popover / Desglose de Sentimiento Gemini */}
+          {showSentimentDetail && sentiment && (
+            <div className="p-3 bg-slate-900/95 rounded-xl border border-cyan-500/30 text-xs text-slate-200 space-y-1.5 animate-in fade-in zoom-in-95">
+              <div className="flex items-center justify-between font-semibold text-cyan-300">
+                <span className="flex items-center gap-1.5">
+                  <BrainCircuit className="w-4 h-4" />
+                  <span>Diagnóstico Emocional Gemini 3.8 Flash:</span>
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                  Intensidad: <strong className="text-white capitalize">{sentiment.intensity}</strong>
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                <strong>Motivo detectado:</strong> {sentiment.reason}
+              </p>
+              {sentiment.keyObservation && (
+                <p className="text-[11px] text-cyan-200/90 leading-relaxed bg-cyan-950/40 p-2 rounded-lg border border-cyan-500/20">
+                  💡 <strong>Sugerencia terapéutica:</strong> {sentiment.keyObservation}
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Therapeutic Presets Bar */}
@@ -338,6 +523,28 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
                   </div>
 
                   <p className="whitespace-pre-wrap">{msg.text}</p>
+
+                  {/* Indicator on the latest patient message */}
+                  {isUser && msg.id === lastUserMessage?.id && sentiment && (
+                    <div className="mt-2 pt-1.5 border-t border-slate-700/60 flex items-center justify-between gap-2 text-[10px]">
+                      <div className="flex items-center gap-1.5 font-medium">
+                        {sentiment.sentimentCategory === 'feliz' && <Smile className="w-3.5 h-3.5 text-emerald-400" />}
+                        {sentiment.sentimentCategory === 'neutra' && <Meh className="w-3.5 h-3.5 text-sky-400" />}
+                        {sentiment.sentimentCategory === 'preocupada' && <Frown className="w-3.5 h-3.5 text-amber-400" />}
+                        <span className={`capitalize font-semibold ${
+                          sentiment.sentimentCategory === 'feliz'
+                            ? 'text-emerald-300'
+                            : sentiment.sentimentCategory === 'preocupada'
+                            ? 'text-amber-300'
+                            : 'text-sky-300'
+                        }`}>
+                          Sentimiento: {sentiment.sentimentCategory}
+                        </span>
+                        <span className="text-slate-400">({sentiment.emotion})</span>
+                      </div>
+                      <span className="text-[9px] text-cyan-400/80 font-mono">Gemini 3.8</span>
+                    </div>
+                  )}
 
                   {/* Delivery Status Indicator for Psychologist Messages */}
                   {isPsychologist && (

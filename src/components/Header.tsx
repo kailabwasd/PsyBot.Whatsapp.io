@@ -129,38 +129,25 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             </div>
 
-            {/* SubaTech Co-branding & Indicadores Rápidos */}
-            <div className="hidden lg:flex items-center space-x-3 text-xs">
-              <button
-                onClick={() => {
-                  const navBtn = document.querySelector('[data-tab="INTEGRATION"]') as HTMLButtonElement;
-                  if (navBtn) navBtn.click();
-                }}
-                className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-900 transition font-medium"
-                title="Abrir panel de integración WhatsApp Twilio 24/7"
-              >
-                <Radio className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
-                <span className="text-slate-600">WhatsApp Suba:</span>
-                <span className="font-mono font-bold text-slate-900">+1 415 523 8886</span>
-              </button>
-
+            {/* Indicadores Clínicos de Guardia */}
+            <div className="hidden lg:flex items-center space-x-2 text-xs">
               {crisisCount > 0 && (
-                <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-[#C8102E] text-white font-bold shadow-sm animate-pulse">
+                <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-[#C8102E] text-white font-bold shadow-sm animate-pulse">
                   <ShieldAlert className="w-4 h-4" />
                   <span>{crisisCount} En Crisis</span>
                 </div>
               )}
 
-              <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-700">
-                <Activity className="w-3.5 h-3.5 text-amber-600" />
-                <span>Espera Triage:</span>
-                <span className="font-bold bg-amber-500/20 text-amber-800 px-1.5 py-0.2 rounded">{waitingCount}</span>
+              <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-750 text-slate-300">
+                <Activity className="w-3.5 h-3.5 text-amber-400" />
+                <span>En Espera:</span>
+                <span className="font-bold text-amber-300 font-mono px-1">{waitingCount}</span>
               </div>
 
-              <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-700">
-                <UserCheck className="w-3.5 h-3.5 text-blue-600" />
+              <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-750 text-slate-300">
+                <UserCheck className="w-3.5 h-3.5 text-cyan-400" />
                 <span>Mis Casos:</span>
-                <span className="font-bold text-slate-900">{activeCount}</span>
+                <span className="font-bold text-white font-mono px-1">{activeCount}</span>
               </div>
             </div>
 

@@ -4,7 +4,6 @@ import {
   User, 
   ShieldCheck, 
   Palette, 
-  Key, 
   X, 
   CheckCircle2, 
   Award, 
@@ -12,7 +11,6 @@ import {
   Sliders, 
   Globe, 
   Database, 
-  Terminal, 
   AlertCircle, 
   FileClock,
   QrCode,
@@ -21,9 +19,17 @@ import {
   RefreshCw,
   Check,
   KeyRound,
-  ExternalLink
+  ExternalLink,
+  Eye,
+  Edit3,
+  Save,
+  BookOpen,
+  FileEdit,
+  UserCheck,
+  ShieldAlert,
+  ChevronDown
 } from 'lucide-react';
-import type { PsychologistAuthUser } from '../types/index.ts';
+import type { PsychologistAuthUser, PsychologistPermissions } from '../types/index.ts';
 import { savePsychologistProfile } from '../lib/firebase.ts';
 import { AuditLog, logAuditEvent } from './AuditLog.tsx';
 
@@ -32,7 +38,12 @@ interface SettingsModalProps {
   onClose: () => void;
   onUpdateUser: (updated: PsychologistAuthUser) => void;
   allPsychologists: PsychologistAuthUser[];
-  onUpdatePsychologistRole: (uid: string, isAdmin: boolean) => void;
+  onUpdatePsychologistRole: (
+    uid: string, 
+    isAdmin: boolean, 
+    role?: string, 
+    permissions?: PsychologistPermissions
+  ) => void;
   themeMode: 'light' | 'dark' | 'subatech';
   onThemeChange: (theme: 'light' | 'dark' | 'subatech') => void;
 }
@@ -46,7 +57,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   themeMode,
   onThemeChange,
 }) => {
-  const [activeTab, setActiveTab] = useState<'profile' | 'twofactor' | 'admins' | 'theme' | 'secrets' | 'audit'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'twofactor' | 'admins' | 'theme' | 'audit'>('profile');
   
   // Profile editing local state
   const [displayName, setDisplayName] = useState(currentUser.displayName || '');
@@ -67,14 +78,93 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [twoFactorSuccess, setTwoFactorSuccess] = useState<string | null>(null);
   const [copiedSecret, setCopiedSecret] = useState(false);
 
-  // Secrets editing (Only for owner/admin)
-  const [twilioSid, setTwilioSid] = useState(localStorage.getItem('subatech_twilio_sid') || 'AC_mock_subatech_9921');
-  const [twilioAuth, setTwilioAuth] = useState(localStorage.getItem('subatech_twilio_auth') || '••••••••••••••••••••');
-  const [githubToken, setGithubToken] = useState(localStorage.getItem('subatech_github_token') || 'ghp_subatech_live_prod_sec');
-  const [railwayKey, setRailwayKey] = useState(localStorage.getItem('subatech_railway_key') || 'rw_prod_key_suba_cluster');
-  const [secretsSaved, setSecretsSaved] = useState(false);
-
   const isOwner = currentUser.email === 'kailabwasd@gmail.com' || currentUser.isAdmin;
+
+  // Roles y Permisos State Management
+  const [psychDrafts, setPsychDrafts] = useState<Record<string, {
+    role: string;
+    customRole: string;
+    isCustomRole: boolean;
+    isAdmin: boolean;
+    permissions: PsychologistPermissions;
+    isSaving?: boolean;
+    savedNotice?: boolean;
+  }>>({});
+
+  const STANDARD_CLINICAL_ROLES = [
+    'Psicólogo(a) Clínico(a) Titulado(a)',
+    'Terapeuta de Guardia y Crisis 24/7',
+    'Supervisor(a) de Triage e Interconsulta',
+    'Coordinador(a) de Salud Mental Subred Norte',
+    'Psicólogo(a) de Apoyo Emocional',
+    'Administrador(a) Clínico y de Auditoría',
+    'OTRO_PERSONALIZADO'
+  ];
+
+  const getPsychDraft = (psych: PsychologistAuthUser) => {
+    if (psychDrafts[psych.uid]) {
+      return psychDrafts[psych.uid];
+    }
+    const defaultPerms: PsychologistPermissions = psych.permissions || {
+      lectura: true,
+      escritura: true,
+      administrativo: Boolean(psych.isAdmin),
+    };
+    const isCustom = !STANDARD_CLINICAL_ROLES.slice(0, -1).includes(psych.role);
+    return {
+      role: isCustom ? 'OTRO_PERSONALIZADO' : psych.role,
+      customRole: isCustom ? psych.role : '',
+      isCustomRole: isCustom,
+      isAdmin: Boolean(psych.isAdmin),
+      permissions: defaultPerms,
+    };
+  };
+
+  const updatePsychDraft = (uid: string, patch: Partial<{
+    role: string;
+    customRole: string;
+    isCustomRole: boolean;
+    isAdmin: boolean;
+    permissions: PsychologistPermissions;
+    isSaving: boolean;
+    savedNotice: boolean;
+  }>) => {
+    const psych = allPsychologists.find(p => p.uid === uid);
+    if (!psych) return;
+    const current = getPsychDraft(psych);
+    setPsychDrafts(prev => ({
+      ...prev,
+      [uid]: { ...current, ...patch }
+    }));
+  };
+
+  const handleSavePsychologistPermissions = async (psych: PsychologistAuthUser) => {
+    const draft = getPsychDraft(psych);
+    const finalRole = draft.isCustomRole ? (draft.customRole.trim() || 'Psicólogo Clínico') : draft.role;
+    
+    updatePsychDraft(psych.uid, { isSaving: true });
+    
+    try {
+      await onUpdatePsychologistRole(psych.uid, draft.isAdmin, finalRole, draft.permissions);
+      
+      await logAuditEvent({
+        adminEmail: currentUser.email || 'kailabwasd@gmail.com',
+        adminName: currentUser.displayName || 'Owner',
+        action: 'ROLE_UPDATE',
+        severity: 'CRITICAL',
+        category: 'ROLES',
+        details: `Actualización de rol y permisos para ${psych.displayName} (${psych.email || 'sin correo'}). Rol: "${finalRole}". Permisos: Lectura=${draft.permissions.lectura ? 'SÍ' : 'NO'}, Escritura=${draft.permissions.escritura ? 'SÍ' : 'NO'}, Administrativo=${draft.permissions.administrativo ? 'SÍ' : 'NO'}.`,
+      });
+
+      updatePsychDraft(psych.uid, { isSaving: false, savedNotice: true });
+      setTimeout(() => {
+        updatePsychDraft(psych.uid, { savedNotice: false });
+      }, 3000);
+    } catch (err) {
+      console.error('Error saving psychologist permissions:', err);
+      updatePsychDraft(psych.uid, { isSaving: false });
+    }
+  };
 
   // Generate 2FA Secret and QR Code using backend speakeasy
   const handleGenerate2FA = async () => {
@@ -226,26 +316,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setTimeout(() => setSuccessMsg(null), 3000);
   };
 
-  const handleSaveSecrets = async (e: React.FormEvent) => {
-    e.preventDefault();
-    localStorage.setItem('subatech_twilio_sid', twilioSid);
-    localStorage.setItem('subatech_twilio_auth', twilioAuth);
-    localStorage.setItem('subatech_github_token', githubToken);
-    localStorage.setItem('subatech_railway_key', railwayKey);
-
-    await logAuditEvent({
-      adminEmail: currentUser.email || 'owner@subatech.gov.co',
-      adminName: currentUser.displayName || 'Owner',
-      action: 'SYSTEM_CONFIG',
-      severity: 'WARNING',
-      category: 'SISTEMA',
-      details: 'Modificación y rotación de credenciales sensibles (Twilio, GitHub & Railway Production Keys).',
-    });
-
-    setSecretsSaved(true);
-    setTimeout(() => setSecretsSaved(false), 3000);
-  };
-
   return (
     <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
       <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-3xl w-full flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 text-slate-100">
@@ -302,7 +372,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition cursor-pointer whitespace-nowrap ${activeTab === 'admins' ? 'border-[#00E5FF] text-[#00E5FF]' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
             >
               <ShieldCheck className="w-4 h-4 text-[#2BF267]" />
-              <span>Administradores</span>
+              <span>Roles y Permisos</span>
             </button>
           )}
 
@@ -316,23 +386,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           {isOwner && (
             <button
-              onClick={() => setActiveTab('secrets')}
-              className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition cursor-pointer whitespace-nowrap ${activeTab === 'secrets' ? 'border-[#00E5FF] text-[#00E5FF]' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
-            >
-              <Key className="w-4 h-4 text-[#FF3646]" />
-              <span>Twilio, Github & Railway Secrets</span>
-              <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-950 text-red-300 border border-red-500/40">Owner</span>
-            </button>
-          )}
-
-          {isOwner && (
-            <button
               onClick={() => setActiveTab('audit')}
               className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition cursor-pointer whitespace-nowrap ${activeTab === 'audit' ? 'border-[#00E5FF] text-[#00E5FF]' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
             >
               <FileClock className="w-4 h-4 text-[#2BF267]" />
-              <span>AuditLog</span>
-              <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-500/40">Admin</span>
+              <span>Registro de Auditoría</span>
             </button>
           )}
         </div>
@@ -612,62 +670,345 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           )}
 
-          {/* TAB 3: ADMINS (Only for Owner) */}
+          {/* TAB 3: ROLES Y PERMISOS (Only for Owner/Admin) */}
           {activeTab === 'admins' && isOwner && (
-            <div className="space-y-4">
-              <div className="p-3.5 rounded-2xl bg-amber-950/40 border border-amber-500/30 text-xs text-amber-200 flex items-start gap-3">
-                <ShieldCheck className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-bold text-amber-300">Gestión de Privilegios Administrativos</p>
-                  <p className="text-slate-300 text-[11px] mt-0.5">
-                    Como Owner, puedes otorgar o revocar privilegios de administrador a los psicólogos registrados en la plataforma SubaTECH.
+            <div className="space-y-5">
+              
+              {/* Header banner */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-cyan-950/40 via-slate-900 to-amber-950/40 border border-cyan-500/30 text-xs flex items-start gap-3.5">
+                <div className="w-9 h-9 rounded-xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400 shrink-0 mt-0.5">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div className="space-y-1">
+                  <p className="font-bold text-white text-sm">
+                    Gestión de Roles y Permisos Específicos
+                  </p>
+                  <p className="text-slate-300 text-xs leading-relaxed">
+                    Como Administrador, puedes asignar el rol clínico actual y configurar los 3 niveles de permisos específicos (<strong className="text-blue-300">Lectura</strong>, <strong className="text-emerald-300">Escritura</strong> y <strong className="text-amber-300">Administrativo</strong>) para cada psicólogo registrado.
                   </p>
                 </div>
               </div>
 
-              <div className="space-y-2">
+              {/* Guía rápida de permisos */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[11px]">
+                <div className="p-2.5 rounded-xl bg-slate-950 border border-blue-500/20 flex items-center gap-2 text-slate-300">
+                  <BookOpen className="w-4 h-4 text-blue-400 shrink-0" />
+                  <span><strong>Lectura:</strong> Consulta de expedientes, notas y triage.</span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-slate-950 border border-emerald-500/20 flex items-center gap-2 text-slate-300">
+                  <FileEdit className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span><strong>Escritura:</strong> Atención por chat y redacción de evolución.</span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-slate-950 border border-amber-500/20 flex items-center gap-2 text-slate-300">
+                  <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span><strong>Administrativo:</strong> Configuración, auditoría y roles.</span>
+                </div>
+              </div>
+
+              {/* Lista de Psicólogos con asignación */}
+              <div className="space-y-4">
                 {allPsychologists.length === 0 ? (
-                  <p className="text-xs text-slate-400 text-center py-6">No hay otros psicólogos registrados actualmente.</p>
+                  <div className="p-8 text-center bg-slate-950 rounded-2xl border border-slate-800">
+                    <User className="w-10 h-10 text-slate-600 mx-auto mb-2" />
+                    <p className="text-xs text-slate-400">No hay otros psicólogos registrados actualmente en Firestore.</p>
+                  </div>
                 ) : (
-                  allPsychologists.map((psych) => (
-                    <div key={psych.uid} className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-4">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <img src={psych.photoURL} alt={psych.displayName} className="w-10 h-10 rounded-xl object-cover" />
-                        <div className="min-w-0">
-                          <p className="text-xs font-bold text-white truncate">{psych.displayName}</p>
-                          <p className="text-[11px] text-slate-400 truncate">{psych.email || 'Sin correo'}</p>
-                          <span className="text-[10px] font-mono text-blue-400">{psych.license || 'Sin registro'}</span>
+                  allPsychologists.map((psych) => {
+                    const draft = getPsychDraft(psych);
+                    const isProtectedOwner = psych.email === 'kailabwasd@gmail.com';
+
+                    return (
+                      <div 
+                        key={psych.uid} 
+                        className="p-4 rounded-2xl bg-slate-950 border border-slate-800 hover:border-slate-750 transition space-y-4"
+                      >
+                        {/* Cabecera del usuario */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-850">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <img 
+                              src={psych.photoURL} 
+                              alt={psych.displayName} 
+                              className="w-11 h-11 rounded-xl object-cover ring-1 ring-slate-700" 
+                            />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <p className="text-xs font-bold text-white truncate">{psych.displayName}</p>
+                                {isProtectedOwner ? (
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                                    👑 Owner Principal
+                                  </span>
+                                ) : draft.isAdmin ? (
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                                    👑 Admin
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-slate-800 text-slate-400">
+                                    👨‍⚕️ Clínico
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[11px] text-slate-400 truncate">{psych.email || 'Sin correo registrado'}</p>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                <span className="text-[10px] font-mono text-cyan-400">
+                                  {psych.license || 'Sin registro sanitario'}
+                                </span>
+                                {psych.uniqueUserId && (
+                                  <span className="text-[10px] font-mono text-slate-500">
+                                    · ID: {psych.uniqueUserId}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Resumen de permisos activos */}
+                          <div className="flex flex-wrap items-center gap-1.5 self-start sm:self-center">
+                            <span className={`text-[10px] px-2 py-0.5 rounded-md font-semibold flex items-center gap-1 ${
+                              draft.permissions.lectura 
+                                ? 'bg-blue-500/15 text-blue-300 border border-blue-500/30' 
+                                : 'bg-slate-900 text-slate-600 line-through'
+                            }`}>
+                              <BookOpen className="w-2.5 h-2.5" /> Lectura
+                            </span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-md font-semibold flex items-center gap-1 ${
+                              draft.permissions.escritura 
+                                ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' 
+                                : 'bg-slate-900 text-slate-600 line-through'
+                            }`}>
+                              <FileEdit className="w-2.5 h-2.5" /> Escritura
+                            </span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-md font-semibold flex items-center gap-1 ${
+                              draft.permissions.administrativo 
+                                ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30' 
+                                : 'bg-slate-900 text-slate-600 line-through'
+                            }`}>
+                              <ShieldAlert className="w-2.5 h-2.5" /> Admin
+                            </span>
+                          </div>
                         </div>
-                      </div>
 
-                      <div className="flex items-center gap-3 shrink-0">
-                        <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold ${psych.isAdmin ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-slate-800 text-slate-400'}`}>
-                          {psych.isAdmin ? '👑 Administrador' : '👤 Psicólogo'}
-                        </span>
+                        {/* Selección de Rol Actual */}
+                        <div className="space-y-1.5">
+                          <label className="text-[11px] font-bold text-slate-300 flex items-center justify-between">
+                            <span>Seleccionar Rol Clínico:</span>
+                            <span className="text-[10px] text-cyan-400 font-mono">
+                              Rol asignado: {draft.isCustomRole ? draft.customRole || 'Personalizado' : draft.role}
+                            </span>
+                          </label>
 
-                        {psych.email !== 'kailabwasd@gmail.com' && (
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              const newStatus = !psych.isAdmin;
-                              onUpdatePsychologistRole(psych.uid, newStatus);
-                              await logAuditEvent({
-                                adminEmail: currentUser.email || 'kailabwasd@gmail.com',
-                                adminName: currentUser.displayName || 'Owner',
-                                action: 'ROLE_UPDATE',
-                                severity: 'CRITICAL',
-                                category: 'ROLES',
-                                details: `${newStatus ? 'Concesión de privilegios de Administrador' : 'Revocación de rol de Administrador'} para ${psych.displayName} (${psych.email || 'sin correo'}).`,
-                              });
-                            }}
-                            className={`px-3 py-1.5 text-[11px] font-bold rounded-xl transition cursor-pointer ${psych.isAdmin ? 'bg-red-950 text-red-300 hover:bg-red-900 border border-red-500/30' : 'bg-[#2BF267] text-slate-950 hover:bg-emerald-400'}`}
-                          >
-                            {psych.isAdmin ? 'Revocar Admin' : 'Hacer Admin'}
-                          </button>
+                          <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                            <div className={draft.isCustomRole ? 'sm:col-span-6' : 'sm:col-span-12'}>
+                              <select
+                                value={draft.role}
+                                disabled={isProtectedOwner}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  const isCustom = val === 'OTRO_PERSONALIZADO';
+                                  const isAdminRole = val === 'Administrador(a) Clínico y de Auditoría';
+                                  updatePsychDraft(psych.uid, {
+                                    role: val,
+                                    isCustomRole: isCustom,
+                                    ...(isAdminRole
+                                      ? { isAdmin: true, permissions: { ...draft.permissions, administrativo: true } }
+                                      : {})
+                                  });
+                                }}
+                                className="w-full bg-slate-900 border border-slate-750 focus:border-[#00E5FF] rounded-xl px-3 py-2 text-xs text-white outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {STANDARD_CLINICAL_ROLES.map((r) => (
+                                  <option key={r} value={r}>
+                                    {r === 'OTRO_PERSONALIZADO' ? '✏️ Rol Clínico Personalizado...' : r}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            {draft.isCustomRole && (
+                              <div className="sm:col-span-6">
+                                <input
+                                  type="text"
+                                  placeholder="Escribe el rol clínico específico..."
+                                  value={draft.customRole}
+                                  disabled={isProtectedOwner}
+                                  onChange={(e) => updatePsychDraft(psych.uid, { customRole: e.target.value })}
+                                  className="w-full bg-slate-900 border border-cyan-500/40 focus:border-[#00E5FF] rounded-xl px-3 py-2 text-xs text-cyan-200 outline-none placeholder-slate-500 disabled:opacity-50"
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Asignación de Permisos Específicos */}
+                        <div className="space-y-1.5">
+                          <label className="text-[11px] font-bold text-slate-300 block">
+                            Asignar Permisos Específicos:
+                          </label>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            {/* Permiso 1: Lectura */}
+                            <button
+                              type="button"
+                              disabled={isProtectedOwner}
+                              onClick={() => {
+                                updatePsychDraft(psych.uid, {
+                                  permissions: {
+                                    ...draft.permissions,
+                                    lectura: !draft.permissions.lectura
+                                  }
+                                });
+                              }}
+                              className={`p-3 rounded-xl border text-left transition flex items-start gap-2.5 cursor-pointer disabled:cursor-not-allowed ${
+                                draft.permissions.lectura
+                                  ? 'bg-blue-500/15 border-blue-500/40 text-blue-200 shadow-sm'
+                                  : 'bg-slate-900/60 border-slate-800 text-slate-500 hover:border-slate-700'
+                              }`}
+                            >
+                              <BookOpen className={`w-4 h-4 shrink-0 mt-0.5 ${draft.permissions.lectura ? 'text-blue-400' : 'text-slate-600'}`} />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-bold text-xs text-white">Lectura</span>
+                                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold ${
+                                    draft.permissions.lectura ? 'bg-blue-500/25 text-blue-300' : 'bg-slate-800 text-slate-500'
+                                  }`}>
+                                    {draft.permissions.lectura ? 'Activo' : 'Denegado'}
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                                  Ver cola de triage, historiales y evolución clínica.
+                                </p>
+                              </div>
+                            </button>
+
+                            {/* Permiso 2: Escritura */}
+                            <button
+                              type="button"
+                              disabled={isProtectedOwner}
+                              onClick={() => {
+                                updatePsychDraft(psych.uid, {
+                                  permissions: {
+                                    ...draft.permissions,
+                                    escritura: !draft.permissions.escritura
+                                  }
+                                });
+                              }}
+                              className={`p-3 rounded-xl border text-left transition flex items-start gap-2.5 cursor-pointer disabled:cursor-not-allowed ${
+                                draft.permissions.escritura
+                                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200 shadow-sm'
+                                  : 'bg-slate-900/60 border-slate-800 text-slate-500 hover:border-slate-700'
+                              }`}
+                            >
+                              <FileEdit className={`w-4 h-4 shrink-0 mt-0.5 ${draft.permissions.escritura ? 'text-emerald-400' : 'text-slate-600'}`} />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-bold text-xs text-white">Escritura</span>
+                                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold ${
+                                    draft.permissions.escritura ? 'bg-emerald-500/25 text-emerald-300' : 'bg-slate-800 text-slate-500'
+                                  }`}>
+                                    {draft.permissions.escritura ? 'Activo' : 'Denegado'}
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                                  Chatear con pacientes por WhatsApp y cerrar casos.
+                                </p>
+                              </div>
+                            </button>
+
+                            {/* Permiso 3: Administrativo */}
+                            <button
+                              type="button"
+                              disabled={isProtectedOwner}
+                              onClick={() => {
+                                const newAdmin = !draft.permissions.administrativo;
+                                updatePsychDraft(psych.uid, {
+                                  isAdmin: newAdmin,
+                                  permissions: {
+                                    ...draft.permissions,
+                                    administrativo: newAdmin
+                                  }
+                                });
+                              }}
+                              className={`p-3 rounded-xl border text-left transition flex items-start gap-2.5 cursor-pointer disabled:cursor-not-allowed ${
+                                draft.permissions.administrativo
+                                  ? 'bg-amber-500/15 border-amber-500/40 text-amber-200 shadow-sm'
+                                  : 'bg-slate-900/60 border-slate-800 text-slate-500 hover:border-slate-700'
+                              }`}
+                            >
+                              <ShieldAlert className={`w-4 h-4 shrink-0 mt-0.5 ${draft.permissions.administrativo ? 'text-amber-400' : 'text-slate-600'}`} />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-bold text-xs text-white">Administrativo</span>
+                                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold ${
+                                    draft.permissions.administrativo ? 'bg-amber-500/25 text-amber-300' : 'bg-slate-800 text-slate-500'
+                                  }`}>
+                                    {draft.permissions.administrativo ? 'Activo' : 'Denegado'}
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                                  Administrar otros psicólogos, roles y auditoría forense.
+                                </p>
+                              </div>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Notificación de guardado exitoso */}
+                        {draft.savedNotice && (
+                          <div className="p-2.5 bg-emerald-950/70 border border-emerald-500/40 rounded-xl text-emerald-200 text-xs flex items-center gap-2 animate-in fade-in">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                            <span>¡Rol y permisos actualizados exitosamente en Firestore!</span>
+                          </div>
+                        )}
+
+                        {/* Botones de acción */}
+                        {!isProtectedOwner && (
+                          <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-850">
+                            {/* Toggle rápido de admin */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const newAdmin = !draft.isAdmin;
+                                updatePsychDraft(psych.uid, {
+                                  isAdmin: newAdmin,
+                                  permissions: {
+                                    ...draft.permissions,
+                                    administrativo: newAdmin
+                                  }
+                                });
+                              }}
+                              className={`px-3 py-1.5 text-xs font-semibold rounded-xl border transition cursor-pointer flex items-center gap-1.5 ${
+                                draft.isAdmin
+                                  ? 'bg-amber-950/40 border-amber-500/40 text-amber-300 hover:bg-amber-900/50'
+                                  : 'bg-slate-900 border-slate-750 text-slate-300 hover:bg-slate-800'
+                              }`}
+                            >
+                              <ShieldCheck className="w-3.5 h-3.5" />
+                              <span>{draft.isAdmin ? 'Quitar Rol Administrador' : 'Asignar como Administrador'}</span>
+                            </button>
+
+                            {/* Guardar cambios para este psicólogo */}
+                            <button
+                              type="button"
+                              disabled={draft.isSaving}
+                              onClick={() => handleSavePsychologistPermissions(psych)}
+                              className="px-4 py-1.5 bg-[#00E5FF] hover:bg-[#00D2F4] text-slate-950 font-bold text-xs rounded-xl shadow transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                            >
+                              {draft.isSaving ? (
+                                <>
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                  <span>Guardando en Firestore...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Save className="w-3.5 h-3.5" />
+                                  <span>Guardar Rol y Permisos</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
                         )}
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -714,80 +1055,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           )}
 
-          {/* TAB 5: SECRETS (Only for Owner) */}
-          {activeTab === 'secrets' && isOwner && (
-            <form onSubmit={handleSaveSecrets} className="space-y-4">
-              <div className="p-3.5 rounded-2xl bg-red-950/40 border border-red-500/30 text-xs text-red-200 flex items-start gap-3">
-                <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-bold text-red-300">Credenciales Sensibles (Ámbito Exclusivo del Owner)</p>
-                  <p className="text-slate-300 text-[11px] mt-0.5">
-                    Modifica los parámetros de integración con Twilio WhatsApp, llaves API de GitHub y variables de entorno de Railway.
-                  </p>
-                </div>
-              </div>
-
-              {secretsSaved && (
-                <div className="p-3 bg-emerald-950/60 border border-emerald-500/40 rounded-xl text-emerald-200 text-xs flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  <span>Secretos actualizados y guardados con cifrado local.</span>
-                </div>
-              )}
-
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Twilio Account SID</label>
-                  <input
-                    type="text"
-                    value={twilioSid}
-                    onChange={(e) => setTwilioSid(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-750 focus:border-[#FF3646] rounded-xl px-3 py-2 text-xs font-mono text-white outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Twilio Auth Token</label>
-                  <input
-                    type="password"
-                    value={twilioAuth}
-                    onChange={(e) => setTwilioAuth(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-750 focus:border-[#FF3646] rounded-xl px-3 py-2 text-xs font-mono text-white outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">GitHub Personal Access Token</label>
-                  <input
-                    type="password"
-                    value={githubToken}
-                    onChange={(e) => setGithubToken(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-750 focus:border-[#FF3646] rounded-xl px-3 py-2 text-xs font-mono text-white outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Railway Production Secret Key</label>
-                  <input
-                    type="password"
-                    value={railwayKey}
-                    onChange={(e) => setRailwayKey(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-750 focus:border-[#FF3646] rounded-xl px-3 py-2 text-xs font-mono text-white outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-2 flex justify-end">
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-[#FF3646] hover:bg-red-600 text-white font-bold text-xs shadow transition cursor-pointer"
-                >
-                  Guardar Secretos del Sistema
-                </button>
-              </div>
-            </form>
-          )}
-
-          {/* TAB 6: AUDIT LOG */}
+          {/* TAB: AUDIT LOG */}
           {activeTab === 'audit' && (
             <AuditLog currentUser={currentUser} />
           )}

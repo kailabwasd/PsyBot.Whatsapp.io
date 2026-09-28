@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, Type } from '@google/genai';
 import speakeasy from 'speakeasy';
 import QRCode from 'qrcode';
 import type { PatientSession, ChatMessage, RiskLevel } from './src/types/index.ts';
@@ -1380,6 +1380,155 @@ app.post('/api/sessions/close', (req, res) => {
   session.messages.push(farewellMsg);
 
   res.json({ success: true, session });
+});
+
+// POST analyze patient sentiment with Gemini 3.8 Flash
+app.post('/api/gemini/sentiment', async (req, res) => {
+  const { text, patientName, previousMessages } = req.body;
+  if (!text || typeof text !== 'string') {
+    return res.status(400).json({ error: 'Text is required for sentiment analysis' });
+  }
+
+  const cleanText = text.trim();
+  if (!process.env.GEMINI_API_KEY) {
+    // Fast local heuristic fallback
+    const lower = cleanText.toLowerCase();
+    let sentimentCategory: 'feliz' | 'neutra' | 'preocupada' = 'neutra';
+    let emotion = 'Neutro / Reflexivo';
+    let reason = 'Expresión con carga afectiva equilibrada.';
+
+    if (
+      lower.includes('gracias') || 
+      lower.includes('mejor') || 
+      lower.includes('bien') || 
+      lower.includes('tranquil') || 
+      lower.includes('aliviad') || 
+      lower.includes('calm') || 
+      lower.includes('content') || 
+      lower.includes('excelente') ||
+      lower.includes('sirvió') ||
+      lower.includes('pude')
+    ) {
+      sentimentCategory = 'feliz';
+      emotion = 'Aliviado / Esperanzado';
+      reason = 'Expresa gratitud, sensación de mejoría o alivio emocional.';
+    } else if (
+      lower.includes('triste') || 
+      lower.includes('llorar') || 
+      lower.includes('miedo') || 
+      lower.includes('angustia') || 
+      lower.includes('ansied') || 
+      lower.includes('pánico') || 
+      lower.includes('solo') || 
+      lower.includes('duele') || 
+      lower.includes('morir') || 
+      lower.includes('desesperad') || 
+      lower.includes('agobiad') || 
+      lower.includes('mal') ||
+      lower.includes('pesadilla') ||
+      lower.includes('no puedo')
+    ) {
+      sentimentCategory = 'preocupada';
+      emotion = 'Preocupado / Angustiado';
+      reason = 'Manifiesta afecto negativo, preocupación o malestar emocional significativo.';
+    }
+
+    return res.json({
+      success: true,
+      sentimentCategory,
+      emotion,
+      intensity: sentimentCategory === 'preocupada' ? 'alta' : 'media',
+      reason,
+      keyObservation: 'Evaluación rápida de respuesta en tiempo real.',
+      source: 'local_heuristic'
+    });
+  }
+
+  try {
+    const prompt = `Analiza el estado emocional y sentimiento del paciente en su último mensaje recibido en el chat de atención psicológica distrital.
+Paciente: ${patientName || 'Paciente'}
+Último mensaje recibido del paciente: "${cleanText}"
+${previousMessages && Array.isArray(previousMessages) && previousMessages.length > 0 ? `Contexto previo:\n${previousMessages.slice(-4).map((m: any) => `${m.sender === 'user' ? 'Paciente' : 'Psicólogo'}: ${m.text}`).join('\n')}` : ''}
+
+Clasifica estrictamente la categoría principal en una de las 3 siguientes:
+- "feliz" (si el paciente muestra alivio, gratitud, calma, mejoría, optimismo, alegría, distensión o esperanza)
+- "neutra" (si es una respuesta informativa, fría, datos, preguntas neutras o sin carga afectiva marcada)
+- "preocupada" (si hay angustia, tristeza, miedo, ansiedad, crisis, queja, desesperanza, dolor, agobio o preocupación)
+
+Responde en formato JSON válido.`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            sentimentCategory: {
+              type: Type.STRING,
+              description: 'Debe ser exactamente: "feliz", "neutra" o "preocupada"',
+            },
+            emotion: {
+              type: Type.STRING,
+              description: 'Nombre clínico de la emoción principal (ej. Aliviado, Agradecido, Neutro, Ansioso, Agobiado, Triste)',
+            },
+            intensity: {
+              type: Type.STRING,
+              description: '"baja", "media" o "alta"',
+            },
+            reason: {
+              type: Type.STRING,
+              description: 'Breve explicación en 1 frase de por qué el paciente expresa este sentimiento.',
+            },
+            keyObservation: {
+              type: Type.STRING,
+              description: 'Recomendación o guía breve para el terapeuta.',
+            },
+          },
+          required: ['sentimentCategory', 'emotion', 'intensity', 'reason'],
+        },
+      },
+    });
+
+    const parsed = JSON.parse(response.text?.trim() || '{}');
+    let cat = (parsed.sentimentCategory || 'neutra').toLowerCase();
+    if (cat !== 'feliz' && cat !== 'neutra' && cat !== 'preocupada') {
+      if (cat.includes('fel') || cat.includes('aleg') || cat.includes('calm') || cat.includes('bien')) cat = 'feliz';
+      else if (cat.includes('preoc') || cat.includes('ang') || cat.includes('trist') || cat.includes('ans')) cat = 'preocupada';
+      else cat = 'neutra';
+    }
+
+    return res.json({
+      success: true,
+      sentimentCategory: cat,
+      emotion: parsed.emotion || (cat === 'feliz' ? 'Aliviado' : cat === 'preocupada' ? 'Preocupado' : 'Neutro'),
+      intensity: parsed.intensity || 'media',
+      reason: parsed.reason || 'Evaluación de sentimiento asistida por Gemini 3.8 Flash',
+      keyObservation: parsed.keyObservation || '',
+      source: 'gemini'
+    });
+  } catch (err: any) {
+    console.error('Gemini sentiment analysis error:', err);
+    // Fallback if API fails
+    const lower = cleanText.toLowerCase();
+    let sentimentCategory: 'feliz' | 'neutra' | 'preocupada' = 'neutra';
+    if (lower.includes('gracias') || lower.includes('mejor') || lower.includes('bien') || lower.includes('tranquil') || lower.includes('calm')) {
+      sentimentCategory = 'feliz';
+    } else if (lower.includes('triste') || lower.includes('miedo') || lower.includes('angustia') || lower.includes('ansied') || lower.includes('mal')) {
+      sentimentCategory = 'preocupada';
+    }
+
+    return res.json({
+      success: true,
+      sentimentCategory,
+      emotion: sentimentCategory === 'feliz' ? 'Aliviado' : sentimentCategory === 'preocupada' ? 'Preocupado' : 'Neutro',
+      intensity: 'media',
+      reason: 'Evaluación rápida de sentimiento.',
+      keyObservation: '',
+      source: 'fallback'
+    });
+  }
 });
 
 // POST simulate realistic scenarios

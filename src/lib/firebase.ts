@@ -85,6 +85,11 @@ export function createAdminProfile(email = 'kailabwasd@gmail.com', name?: string
     termsAccepted: true,
     profileCompleted: true,
     isAdmin: true,
+    permissions: {
+      lectura: true,
+      escritura: true,
+      administrativo: true,
+    },
     createdAt: Date.now(),
     lastLoginAt: Date.now(),
   };
@@ -144,6 +149,11 @@ export async function getPsychologistFromFirestore(uid: string): Promise<Psychol
 export async function savePsychologistProfile(profile: PsychologistAuthUser): Promise<PsychologistAuthUser> {
   const updatedProfile: PsychologistAuthUser = {
     ...profile,
+    permissions: profile.permissions || {
+      lectura: true,
+      escritura: true,
+      administrativo: Boolean(profile.isAdmin),
+    },
     profileCompleted: true,
     lastLoginAt: Date.now(),
   };

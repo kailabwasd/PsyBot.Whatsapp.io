@@ -131,6 +131,10 @@
           "type": "string",
           "description": "Teléfono de contacto clínico o de guardia"
         },
+        "permissions": {
+          "type": "object",
+          "description": "Permisos específicos asignados por el administrador (lectura, escritura, administrativo)"
+        },
         "lastLoginAt": {
           "type": "number",
           "description": "Timestamp del último inicio de sesión"

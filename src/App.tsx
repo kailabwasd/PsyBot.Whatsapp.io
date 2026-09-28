@@ -3,7 +3,6 @@ import {
   Inbox, 
   MessageSquare, 
   Bot, 
-  FileCode2, 
   ShieldAlert, 
   X, 
   User, 
@@ -27,7 +26,6 @@ import { Header } from './components/Header.tsx';
 import { GeneralQueue } from './components/GeneralQueue.tsx';
 import { ActiveChat } from './components/ActiveChat.tsx';
 import { AiSupervisor } from './components/AiSupervisor.tsx';
-import { IntegrationDocs } from './components/IntegrationDocs.tsx';
 import { ClinicalReportModal } from './components/ClinicalReportModal.tsx';
 import { ClinicalRecordsView } from './components/ClinicalRecordsView.tsx';
 import { PsychologistLogin } from './components/PsychologistLogin.tsx';
@@ -56,7 +54,7 @@ import {
 } from './lib/firebase.ts';
 import { onAuthStateChanged } from 'firebase/auth';
 
-type NavigationTab = 'QUEUE' | 'ACTIVE' | 'SUPERVISOR' | 'RECORDS' | 'INTEGRATION';
+type NavigationTab = 'QUEUE' | 'ACTIVE' | 'SUPERVISOR' | 'RECORDS';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<PsychologistAuthUser | null>(() => getStoredPsychologist());
@@ -627,20 +625,6 @@ export default function App() {
                 </span>
               )}
             </button>
-
-            {/* Documentación de Integración Twilio */}
-            <button
-              data-tab="INTEGRATION"
-              onClick={() => setActiveTab('INTEGRATION')}
-              className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
-                activeTab === 'INTEGRATION'
-                  ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
-                  : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
-              }`}
-            >
-              <FileCode2 className="w-4 h-4 text-amber-300" />
-              <span>Conexión Twilio & WhatsApp</span>
-            </button>
           </nav>
 
           {/* Right scroll navigation arrow */}
@@ -711,11 +695,6 @@ export default function App() {
             }}
             onPreview={(session) => setPreviewModalSession(session)}
           />
-        )}
-
-        {/* TAB 5: Documentación e Integración Twilio */}
-        {activeTab === 'INTEGRATION' && (
-          <IntegrationDocs />
         )}
 
       </main>
@@ -867,12 +846,25 @@ export default function App() {
             savePsychologistProfile(updated);
           }}
           allPsychologists={allPsychologists}
-          onUpdatePsychologistRole={async (uid, isAdmin) => {
-            const updatedList = allPsychologists.map(p => p.uid === uid ? { ...p, isAdmin } : p);
+          onUpdatePsychologistRole={async (uid, isAdmin, role, permissions) => {
+            const updatedList = allPsychologists.map(p => {
+              if (p.uid === uid) {
+                return {
+                  ...p,
+                  isAdmin,
+                  ...(role !== undefined ? { role } : {}),
+                  ...(permissions !== undefined ? { permissions } : {}),
+                };
+              }
+              return p;
+            });
             setAllPsychologists(updatedList);
             const target = updatedList.find(p => p.uid === uid);
             if (target) {
               await savePsychologistProfile(target);
+              if (currentUser && currentUser.uid === uid) {
+                setCurrentUser(target);
+              }
             }
           }}
           themeMode={themeMode}

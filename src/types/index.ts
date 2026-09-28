@@ -52,6 +52,12 @@ export interface PsychologistProfile {
   activeCasesCount: number;
 }
 
+export interface PsychologistPermissions {
+  lectura: boolean;
+  escritura: boolean;
+  administrativo: boolean;
+}
+
 export interface PsychologistAuthUser {
   uid: string;
   email: string | null;
@@ -68,6 +74,7 @@ export interface PsychologistAuthUser {
   twoFactorSecret?: string;
   twoFactorEnabled?: boolean;
   isAdmin?: boolean;
+  permissions?: PsychologistPermissions;
   uniqueUserId?: string; // Unique numerical user ID e.g. SUB-1042
   createdAt?: number;
   lastLoginAt?: number;
