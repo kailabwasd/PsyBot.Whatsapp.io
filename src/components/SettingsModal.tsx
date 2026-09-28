@@ -20,7 +20,8 @@ import {
   Copy,
   RefreshCw,
   Check,
-  KeyRound
+  KeyRound,
+  ExternalLink
 } from 'lucide-react';
 import type { PsychologistAuthUser } from '../types/index.ts';
 import { savePsychologistProfile } from '../lib/firebase.ts';
@@ -794,7 +795,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3 bg-slate-850 border-t border-slate-800 flex justify-end">
+        <div className="px-6 py-3 bg-slate-850 border-t border-slate-800 flex items-center justify-between">
+          <a
+            href="https://drive.google.com/drive/folders/1VeROKtR3yWXn2X8Hkx_AwZIMO0jS-xmu?usp=drive_link"
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs text-cyan-300 hover:text-white flex items-center gap-1.5 transition underline font-semibold"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            <span>Carpeta Google Drive del Proyecto</span>
+          </a>
+
           <button
             onClick={onClose}
             className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-750 text-white transition cursor-pointer"

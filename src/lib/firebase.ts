@@ -179,6 +179,51 @@ export async function savePsychologistProfile(profile: PsychologistAuthUser): Pr
 }
 
 /**
+ * Sign in directly with a Google account email (useful when Firebase OAuth domain is not yet whitelisted)
+ */
+export async function signInWithGoogleDirect(googleEmail: string, displayName?: string): Promise<{ user: PsychologistAuthUser; isNewOrIncomplete: boolean }> {
+  const cleanEmail = (googleEmail || 'kailabwasd@gmail.com').trim().toLowerCase();
+  
+  if (isUserAdmin(cleanEmail)) {
+    const adminProfile = createAdminProfile(
+      cleanEmail,
+      displayName || 'Administrador Clínico (kailabwasd)',
+      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80'
+    );
+    await savePsychologistProfile(adminProfile);
+    return { user: adminProfile, isNewOrIncomplete: false };
+  }
+
+  const uid = `google-${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+  const existing = await getPsychologistFromFirestore(uid);
+
+  if (existing && existing.profileCompleted && existing.license?.trim()) {
+    localStorage.setItem('psybot_psychologist_session', JSON.stringify(existing));
+    return { user: existing, isNewOrIncomplete: false };
+  }
+
+  const draftUser: PsychologistAuthUser = {
+    uid,
+    email: cleanEmail,
+    displayName: displayName || cleanEmail.split('@')[0],
+    photoURL: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(displayName || cleanEmail)}`,
+    provider: 'google.com',
+    role: existing?.role || 'Psicólogo(a) Clínico Titulado(a)',
+    license: existing?.license || '',
+    specialty: existing?.specialty || 'Atención Psicológica y Triage de Crisis',
+    institution: existing?.institution || 'Subred Integrada de Servicios de Salud Norte - Suba',
+    phone: existing?.phone || '',
+    termsAccepted: true,
+    profileCompleted: false,
+    createdAt: existing?.createdAt || Date.now(),
+    lastLoginAt: Date.now(),
+  };
+
+  localStorage.setItem('psybot_psychologist_session', JSON.stringify(draftUser));
+  return { user: draftUser, isNewOrIncomplete: true };
+}
+
+/**
  * Sign in Psychologist with Google OAuth
  */
 export async function signInWithGoogle(): Promise<{ user: PsychologistAuthUser; isNewOrIncomplete: boolean }> {

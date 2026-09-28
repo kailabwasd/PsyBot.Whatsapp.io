@@ -18,7 +18,9 @@ import {
   Sparkles,
   ChevronRight,
   Database,
-  Table
+  Table,
+  Download,
+  Printer
 } from 'lucide-react';
 import type { ClinicalRecord, PatientSession, PsychologistAuthUser } from '../types';
 import { SubaTechLogo } from './SubaTechLogo.tsx';
@@ -30,6 +32,7 @@ import {
   subscribeToClinicalRecords,
   generatePsychologistAccessLink
 } from '../lib/clinicalRecordsService';
+import { exportClinicalRecordToPDF } from '../lib/pdfExportService';
 import { 
   googleSignIn, 
   logoutGoogle, 
@@ -58,6 +61,8 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
   const [filterRisk, setFilterRisk] = useState<string>('ALL');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isExportingPDF, setIsExportingPDF] = useState(false);
+  const [pdfSuccessNotice, setPdfSuccessNotice] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [saveSuccessNotice, setSaveSuccessNotice] = useState(false);
 
@@ -184,6 +189,22 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
       alert('Error al guardar en Firebase Firestore.');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // Export Selected Record to Official Clinical PDF
+  const handleExportPDF = () => {
+    if (!selectedRecord) return;
+    setIsExportingPDF(true);
+    try {
+      exportClinicalRecordToPDF(selectedRecord, currentUser);
+      setPdfSuccessNotice(true);
+      setTimeout(() => setPdfSuccessNotice(false), 3500);
+    } catch (err) {
+      console.error('Error exporting PDF:', err);
+      alert('Error al generar el documento PDF de la historia clínica.');
+    } finally {
+      setIsExportingPDF(false);
     }
   };
 
@@ -436,6 +457,17 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {/* Export Official PDF Button */}
+                  <button
+                    onClick={handleExportPDF}
+                    disabled={isExportingPDF}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#C8102E] hover:bg-[#A00C24] text-white rounded-xl text-xs font-bold transition shadow-md shadow-red-950 cursor-pointer"
+                    title="Descargar Historia Clínica oficial en formato PDF (Resolución 1995 de 1999)"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>{isExportingPDF ? 'Generando PDF...' : 'Descargar PDF'}</span>
+                  </button>
+
                   {/* Psychologist Direct Access Link Button */}
                   <button
                     onClick={handleCopyLink}
@@ -466,6 +498,13 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
                   </button>
                 </div>
               </div>
+
+              {pdfSuccessNotice && (
+                <div className="bg-red-500/10 border-b border-red-500/20 px-4 py-2 text-xs text-red-300 flex items-center gap-2 animate-in fade-in">
+                  <Download className="w-4 h-4 text-[#C8102E]" />
+                  <span>Historia clínica PDF generada exitosamente conforme a la Resolución 1995 de 1999.</span>
+                </div>
+              )}
 
               {saveSuccessNotice && (
                 <div className="bg-emerald-500/10 border-b border-emerald-500/20 px-4 py-2 text-xs text-emerald-300 flex items-center gap-2">

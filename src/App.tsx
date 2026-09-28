@@ -35,6 +35,14 @@ import { CreatePsychologistProfile } from './components/CreatePsychologistProfil
 import { CookieConsentBanner } from './components/CookieConsentBanner.tsx';
 import { SettingsModal } from './components/SettingsModal.tsx';
 import { SubaTechLogo } from './components/SubaTechLogo.tsx';
+import { LegalTermsModal, LegalTabType } from './components/LegalTermsModal.tsx';
+import { NotificationToastContainer } from './components/NotificationToast.tsx';
+import { 
+  notifyPsychologist, 
+  requestBrowserNotificationPermission, 
+  getNotificationPermission,
+  type NotificationPayload 
+} from './lib/notificationService.ts';
 import { 
   testFirestoreConnection, 
   auth, 
@@ -57,6 +65,8 @@ export default function App() {
   const [isCompletingProfile, setIsCompletingProfile] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [showLegalModal, setShowLegalModal] = useState(false);
+  const [legalTab, setLegalTab] = useState<LegalTabType>('PRIVACY');
   const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'subatech'>('subatech');
   const [allPsychologists, setAllPsychologists] = useState<PsychologistAuthUser[]>([]);
 
@@ -68,6 +78,40 @@ export default function App() {
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const navContainerRef = useRef<HTMLElement | null>(null);
+
+  // Notification states and references
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem('psybot_sound_enabled');
+    return saved !== 'false';
+  });
+  const [browserPermission, setBrowserPermission] = useState<NotificationPermission>(() => getNotificationPermission());
+  const [toasts, setToasts] = useState<NotificationPayload[]>([]);
+  const previousSessionsMapRef = useRef<Map<string, { state: string; messagesCount: number; riskLevel: string }>>(new Map());
+  const isFirstLoadRef = useRef<boolean>(true);
+
+  const toggleSound = () => {
+    setSoundEnabled((prev) => {
+      const next = !prev;
+      localStorage.setItem('psybot_sound_enabled', String(next));
+      return next;
+    });
+  };
+
+  const handleRequestBrowserPermission = async () => {
+    const perm = await requestBrowserNotificationPermission();
+    setBrowserPermission(perm);
+  };
+
+  const handleTestNotification = () => {
+    const testNotif: NotificationPayload = {
+      title: '🚨 Prueba: Paciente en Guardia de Triage',
+      body: 'Paciente de prueba solicita acompañamiento clínico inmediato en Suba.',
+      type: 'CRISIS_ALERT',
+      timestamp: Date.now(),
+    };
+    notifyPsychologist(testNotif, soundEnabled);
+    setToasts((prev) => [testNotif, ...prev.slice(0, 3)]);
+  };
 
   const scrollNav = (direction: 'left' | 'right') => {
     if (navContainerRef.current) {
@@ -173,16 +217,122 @@ export default function App() {
     }
   }, []);
 
-  // Sync sessions from backend periodically
+  // Sync sessions from backend periodically and detect events for notifications
   const loadSessions = async () => {
     const list = await fetchSessions();
     setSessions(list);
+
     if (!activeSessionId && list.length > 0) {
       const firstHuman = list.find((s) => s.state === 'HUMAN_MODE');
       if (firstHuman) {
         setActiveSessionId(firstHuman.id);
       }
     }
+
+    // Check for alerts and notifications if this is not the initial boot
+    if (!isFirstLoadRef.current && currentUser && currentUser.profileCompleted) {
+      const prevMap = previousSessionsMapRef.current;
+
+      list.forEach((s) => {
+        const prev = prevMap.get(s.id);
+
+        // 1. New patient registered in triage queue or crisis alert
+        if (!prev) {
+          if (s.state === 'CRISIS_ALERT' || s.riskLevel === 'CRISIS') {
+            const notif: NotificationPayload = {
+              title: `🚨 ¡Alerta Roja: ${s.userName}!`,
+              body: s.triageSummary || 'Paciente con riesgo crítico detectado en guardia.',
+              type: 'CRISIS_ALERT',
+              sessionId: s.id,
+              patientName: s.userName,
+              timestamp: Date.now(),
+            };
+            notifyPsychologist(notif, soundEnabled, () => {
+              setActiveTab('QUEUE');
+              setPreviewModalSession(s);
+            });
+            setToasts((t) => [notif, ...t.slice(0, 3)]);
+          } else if (s.state === 'WAITING_PSYCHOLOGIST') {
+            const notif: NotificationPayload = {
+              title: `📥 Nuevo Paciente en Guardia: ${s.userName}`,
+              body: s.triageSummary || 'Paciente solicita atención con psicólogo humano.',
+              type: 'NEW_PATIENT',
+              sessionId: s.id,
+              patientName: s.userName,
+              timestamp: Date.now(),
+            };
+            notifyPsychologist(notif, soundEnabled, () => {
+              setActiveTab('QUEUE');
+              setPreviewModalSession(s);
+            });
+            setToasts((t) => [notif, ...t.slice(0, 3)]);
+          }
+        } else {
+          // 2. Existing session transitioned to crisis or waiting
+          if (prev.state !== 'CRISIS_ALERT' && (s.state === 'CRISIS_ALERT' || s.riskLevel === 'CRISIS')) {
+            const notif: NotificationPayload = {
+              title: `🚨 ¡Alerta Crítica: ${s.userName}!`,
+              body: s.triageSummary || 'El caso ha sido reclasificado a riesgo crítico.',
+              type: 'CRISIS_ALERT',
+              sessionId: s.id,
+              patientName: s.userName,
+              timestamp: Date.now(),
+            };
+            notifyPsychologist(notif, soundEnabled, () => {
+              setActiveTab('QUEUE');
+              setPreviewModalSession(s);
+            });
+            setToasts((t) => [notif, ...t.slice(0, 3)]);
+          } else if (prev.state !== 'WAITING_PSYCHOLOGIST' && s.state === 'WAITING_PSYCHOLOGIST') {
+            const notif: NotificationPayload = {
+              title: `📥 Paciente en Cola: ${s.userName}`,
+              body: s.triageSummary || 'Paciente derivado a la bandeja de guardia.',
+              type: 'NEW_PATIENT',
+              sessionId: s.id,
+              patientName: s.userName,
+              timestamp: Date.now(),
+            };
+            notifyPsychologist(notif, soundEnabled, () => {
+              setActiveTab('QUEUE');
+              setPreviewModalSession(s);
+            });
+            setToasts((t) => [notif, ...t.slice(0, 3)]);
+          }
+
+          // 3. New message received in active chat (HUMAN_MODE)
+          if (s.state === 'HUMAN_MODE' && s.messages.length > prev.messagesCount) {
+            const lastMsg = s.messages[s.messages.length - 1];
+            if (lastMsg && lastMsg.sender === 'user') {
+              const notif: NotificationPayload = {
+                title: `💬 Mensaje de ${s.userName}`,
+                body: lastMsg.text,
+                type: 'NEW_MESSAGE',
+                sessionId: s.id,
+                patientName: s.userName,
+                timestamp: Date.now(),
+              };
+              notifyPsychologist(notif, soundEnabled, () => {
+                setActiveTab('ACTIVE');
+                setActiveSessionId(s.id);
+              });
+              setToasts((t) => [notif, ...t.slice(0, 3)]);
+            }
+          }
+        }
+      });
+    }
+
+    // Update reference map
+    const nextMap = new Map<string, { state: string; messagesCount: number; riskLevel: string }>();
+    list.forEach((s) => {
+      nextMap.set(s.id, {
+        state: s.state,
+        messagesCount: s.messages.length,
+        riskLevel: s.riskLevel,
+      });
+    });
+    previousSessionsMapRef.current = nextMap;
+    isFirstLoadRef.current = false;
   };
 
   useEffect(() => {
@@ -385,6 +535,11 @@ export default function App() {
         crisisCount={crisisCount}
         activeCount={myActiveCount}
         onLogout={handleLogout}
+        soundEnabled={soundEnabled}
+        onToggleSound={toggleSound}
+        browserPermission={browserPermission}
+        onRequestPermission={handleRequestBrowserPermission}
+        onTestNotification={handleTestNotification}
       />
 
       {/* 2. Primary Navigation Tabs (Portal Institucional Bogotá.gov.co) */}
@@ -619,8 +774,63 @@ export default function App() {
             </div>
           </div>
 
-          <div className="pt-4 flex flex-col sm:flex-row items-center justify-between text-slate-400 text-[11px] gap-2">
-            <p>© {new Date().getFullYear()} Alcaldía Mayor de Bogotá D.C. Todos los derechos reservados.</p>
+          {/* Legal and Privacy Bar */}
+          <div className="pt-4 mt-4 border-t border-slate-700/60 flex flex-wrap items-center justify-between text-slate-400 text-[11px] gap-3">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setLegalTab('PRIVACY');
+                  setShowLegalModal(true);
+                }}
+                className="hover:text-[#FFC800] transition underline"
+              >
+                Política de Privacidad
+              </button>
+              <span>·</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setLegalTab('HABEAS_DATA');
+                  setShowLegalModal(true);
+                }}
+                className="hover:text-[#FFC800] transition underline"
+              >
+                Tratamiento de Datos Personales (Ley 1581)
+              </button>
+              <span>·</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setLegalTab('TERMS');
+                  setShowLegalModal(true);
+                }}
+                className="hover:text-[#FFC800] transition underline"
+              >
+                Términos y Condiciones
+              </button>
+              <span>·</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setLegalTab('CONSENT');
+                  setShowLegalModal(true);
+                }}
+                className="hover:text-[#FFC800] transition underline"
+              >
+                Secreto Profesional (Ley 1090)
+              </button>
+              <span>·</span>
+              <a
+                href="https://drive.google.com/drive/folders/1VeROKtR3yWXn2X8Hkx_AwZIMO0jS-xmu?usp=drive_link"
+                target="_blank"
+                rel="noreferrer"
+                className="text-cyan-300 hover:text-white transition underline font-semibold inline-flex items-center gap-1"
+              >
+                <span>Google Drive del Proyecto</span>
+              </a>
+            </div>
+
             <div className="flex items-center space-x-3">
               <span className="text-slate-400">SubaTECH · Cocreando la Suba del Futuro</span>
               <span>·</span>
@@ -756,6 +966,38 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* In-App Visual and Sound Notification Toast Container */}
+      <NotificationToastContainer
+        notifications={toasts}
+        onDismiss={(index) => {
+          setToasts((prev) => prev.filter((_, i) => i !== index));
+        }}
+        onAction={(notif) => {
+          if (notif.sessionId) {
+            const matched = sessions.find((s) => s.id === notif.sessionId);
+            if (notif.type === 'NEW_MESSAGE') {
+              setActiveSessionId(notif.sessionId);
+              setActiveTab('ACTIVE');
+            } else {
+              setActiveTab('QUEUE');
+              if (matched) setPreviewModalSession(matched);
+            }
+          } else {
+            setActiveTab('QUEUE');
+          }
+        }}
+        soundEnabled={soundEnabled}
+        onToggleSound={toggleSound}
+      />
+
+      {/* Legal Policies, Data Protection and Terms Modal */}
+      <LegalTermsModal
+        isOpen={showLegalModal}
+        onClose={() => setShowLegalModal(false)}
+        initialTab={legalTab}
+        showAcceptButton={false}
+      />
 
     </div>
   );

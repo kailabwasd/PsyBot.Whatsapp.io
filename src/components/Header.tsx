@@ -13,7 +13,12 @@ import {
   PhoneCall,
   ExternalLink,
   HeartPulse,
-  Settings
+  Settings,
+  Bell,
+  BellOff,
+  Volume2,
+  VolumeX,
+  Sparkles
 } from 'lucide-react';
 import type { PsychologistAuthUser } from '../types/index.ts';
 import { BogotaCrest } from './BogotaCrest.tsx';
@@ -27,6 +32,11 @@ interface HeaderProps {
   crisisCount: number;
   activeCount: number;
   onLogout: () => void;
+  soundEnabled?: boolean;
+  onToggleSound?: () => void;
+  browserPermission?: NotificationPermission;
+  onRequestPermission?: () => void;
+  onTestNotification?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -37,6 +47,11 @@ export const Header: React.FC<HeaderProps> = ({
   crisisCount,
   activeCount,
   onLogout,
+  soundEnabled = true,
+  onToggleSound,
+  browserPermission = 'default',
+  onRequestPermission,
+  onTestNotification,
 }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
@@ -66,6 +81,17 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           <div className="flex items-center space-x-4 text-[11px]">
+            <a 
+              href="https://drive.google.com/drive/folders/1VeROKtR3yWXn2X8Hkx_AwZIMO0jS-xmu?usp=drive_link" 
+              target="_blank" 
+              rel="noreferrer" 
+              className="hover:underline flex items-center gap-1 text-cyan-200 hover:text-white font-semibold"
+              title="Abrir carpeta compartida del proyecto en Google Drive"
+            >
+              <ExternalLink className="w-3 h-3 text-cyan-300" />
+              <span>Google Drive del Proyecto</span>
+            </a>
+            <span className="text-[#6699CC] hidden sm:inline">|</span>
             <a 
               href="https://bogota.gov.co" 
               target="_blank" 
@@ -138,8 +164,52 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             </div>
 
-            {/* Perfil del Profesional Autenticado */}
-            <div className="flex items-center space-x-3 shrink-0">
+            {/* Perfil del Profesional Autenticado y Controles de Notificaciones */}
+            <div className="flex items-center space-x-2.5 shrink-0">
+              
+              {/* Sound toggle button */}
+              {onToggleSound && (
+                <button
+                  type="button"
+                  onClick={onToggleSound}
+                  className={`p-2 rounded-xl border transition flex items-center gap-1.5 text-xs font-semibold ${
+                    soundEnabled
+                      ? 'bg-emerald-950/40 text-emerald-300 border-emerald-500/40 hover:bg-emerald-900/50'
+                      : 'bg-slate-900 text-slate-400 border-slate-750 hover:bg-slate-850'
+                  }`}
+                  title={soundEnabled ? 'Sonido de alertas activado' : 'Sonido silenciado'}
+                >
+                  {soundEnabled ? <Volume2 className="w-4 h-4 text-emerald-400" /> : <VolumeX className="w-4 h-4 text-slate-500" />}
+                  <span className="hidden md:inline">{soundEnabled ? 'Audio ON' : 'Audio OFF'}</span>
+                </button>
+              )}
+
+              {/* Browser notification permission request button */}
+              {browserPermission !== 'granted' && onRequestPermission && (
+                <button
+                  type="button"
+                  onClick={onRequestPermission}
+                  className="p-2 rounded-xl bg-cyan-950/40 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-900/50 text-xs font-semibold flex items-center gap-1.5 transition"
+                  title="Activar notificaciones en el navegador para nuevos pacientes"
+                >
+                  <Bell className="w-4 h-4 text-cyan-400 animate-bounce" />
+                  <span className="hidden md:inline">Activar Alertas</span>
+                </button>
+              )}
+
+              {/* Test Notification Button */}
+              {onTestNotification && (
+                <button
+                  type="button"
+                  onClick={onTestNotification}
+                  className="hidden xl:flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-750 text-slate-300 text-xs transition"
+                  title="Probar sonido y notificación de alerta"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Probar</span>
+                </button>
+              )}
+
               <div className="relative">
                 <button
                   onClick={() => setDropdownOpen(!dropdownOpen)}
@@ -214,6 +284,21 @@ export const Header: React.FC<HeaderProps> = ({
 
                     {/* Acciones */}
                     <div className="space-y-1">
+                      <a
+                        href="https://drive.google.com/drive/folders/1VeROKtR3yWXn2X8Hkx_AwZIMO0jS-xmu?usp=drive_link"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="w-full py-2 px-3 rounded-lg text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 transition flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-2">
+                          <ExternalLink className="w-3.5 h-3.5 text-emerald-700" />
+                          <span>Carpeta Google Drive Oficial</span>
+                        </div>
+                        <span className="text-[10px] bg-white text-emerald-800 px-2 py-0.5 rounded border border-emerald-300">
+                          Drive
+                        </span>
+                      </a>
+
                       <button
                         onClick={() => {
                           setDropdownOpen(false);
