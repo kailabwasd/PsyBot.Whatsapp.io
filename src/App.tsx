@@ -11,7 +11,9 @@ import {
   Phone, 
   Database, 
   ChevronLeft, 
-  ChevronRight 
+  ChevronRight,
+  Users,
+  Globe
 } from 'lucide-react';
 import type { PatientSession, PsychologistProfile, RiskLevel, PsychologistAuthUser } from './types/index.ts';
 import { 
@@ -35,6 +37,8 @@ import { SettingsModal } from './components/SettingsModal.tsx';
 import { SubaTechLogo } from './components/SubaTechLogo.tsx';
 import { LegalTermsModal, LegalTabType } from './components/LegalTermsModal.tsx';
 import { NotificationToastContainer } from './components/NotificationToast.tsx';
+import { PsychologistsDirectoryView } from './components/PsychologistsDirectoryView.tsx';
+import { AppRoute, parseCurrentRoute, navigateTo, normalizeRoute } from './lib/router.ts';
 import { 
   notifyPsychologist, 
   requestBrowserNotificationPermission, 
@@ -54,7 +58,7 @@ import {
 } from './lib/firebase.ts';
 import { onAuthStateChanged } from 'firebase/auth';
 
-type NavigationTab = 'QUEUE' | 'ACTIVE' | 'SUPERVISOR' | 'RECORDS';
+type NavigationTab = 'QUEUE' | 'ACTIVE' | 'SUPERVISOR' | 'RECORDS' | 'PSYCHOLOGISTS' | 'LANDING';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<PsychologistAuthUser | null>(() => getStoredPsychologist());
@@ -68,7 +72,20 @@ export default function App() {
   const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'subatech'>('subatech');
   const [allPsychologists, setAllPsychologists] = useState<PsychologistAuthUser[]>([]);
 
-  const [activeTab, setActiveTab] = useState<NavigationTab>('QUEUE');
+  // Routing and Subdomain Navigation State
+  const [currentRoute, setCurrentRoute] = useState<AppRoute>(() => parseCurrentRoute());
+  const [protectedRouteAttempted, setProtectedRouteAttempted] = useState<string | null>(null);
+
+  const [activeTab, setActiveTab] = useState<NavigationTab>(() => {
+    const route = parseCurrentRoute();
+    if (route === 'triage') return 'QUEUE';
+    if (route === 'chat') return 'ACTIVE';
+    if (route === 'expedientes') return 'RECORDS';
+    if (route === 'supervisor') return 'SUPERVISOR';
+    if (route === 'psicologos') return 'PSYCHOLOGISTS';
+    if (route === 'inicio') return 'LANDING';
+    return 'QUEUE';
+  });
   const [sessions, setSessions] = useState<PatientSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [reportModalSession, setReportModalSession] = useState<PatientSession | null>(null);
@@ -197,6 +214,79 @@ export default function App() {
     };
   }, []);
 
+  // Fetch psychologists list on boot
+  useEffect(() => {
+    listPsychologistsFromFirestore().then((list) => {
+      setAllPsychologists(list);
+    }).catch((err) => {
+      console.warn('Could not load psychologists list on boot:', err);
+    });
+  }, []);
+
+  // Central Router Handler: supports accounts, protection, and browser history
+  const handleNavigate = (rawRoute: AppRoute | string, replace = false) => {
+    const targetRoute = normalizeRoute(rawRoute);
+    const isAuthed = Boolean(currentUser && currentUser.profileCompleted);
+
+    // If unauthenticated and tries to access protected sub-domains
+    if (!isAuthed && (targetRoute === 'triage' || targetRoute === 'chat' || targetRoute === 'expedientes' || targetRoute === 'supervisor' || targetRoute === 'auditoria')) {
+      setProtectedRouteAttempted(targetRoute);
+      setCurrentRoute('login');
+      navigateTo('login', replace);
+      return;
+    }
+
+    if (!isAuthed && targetRoute === 'psicologos') {
+      setProtectedRouteAttempted(null);
+      setCurrentRoute('psicologos');
+      navigateTo('psicologos', replace);
+      return;
+    }
+
+    setProtectedRouteAttempted(null);
+    setCurrentRoute(targetRoute);
+
+    if (targetRoute === 'triage') setActiveTab('QUEUE');
+    else if (targetRoute === 'chat') setActiveTab('ACTIVE');
+    else if (targetRoute === 'expedientes') setActiveTab('RECORDS');
+    else if (targetRoute === 'supervisor') setActiveTab('SUPERVISOR');
+    else if (targetRoute === 'psicologos') setActiveTab('PSYCHOLOGISTS');
+    else if (targetRoute === 'inicio') setActiveTab('LANDING');
+    else if (targetRoute === 'auditoria') {
+      setIsSettingsOpen(true);
+    }
+
+    navigateTo(targetRoute, replace);
+  };
+
+  // Browser Navigation History Listener (Native Back / Forward Buttons)
+  useEffect(() => {
+    const onLocationChange = () => {
+      const nextRoute = parseCurrentRoute();
+      setCurrentRoute(nextRoute);
+
+      if (nextRoute === 'triage') setActiveTab('QUEUE');
+      else if (nextRoute === 'chat') setActiveTab('ACTIVE');
+      else if (nextRoute === 'expedientes') setActiveTab('RECORDS');
+      else if (nextRoute === 'supervisor') setActiveTab('SUPERVISOR');
+      else if (nextRoute === 'psicologos') setActiveTab('PSYCHOLOGISTS');
+      else if (nextRoute === 'inicio') setActiveTab('LANDING');
+      else if (nextRoute === 'auditoria') {
+        setIsSettingsOpen(true);
+      }
+    };
+
+    window.addEventListener('popstate', onLocationChange);
+    window.addEventListener('hashchange', onLocationChange);
+    window.addEventListener('applet:routechange', onLocationChange as any);
+
+    return () => {
+      window.removeEventListener('popstate', onLocationChange);
+      window.removeEventListener('hashchange', onLocationChange);
+      window.removeEventListener('applet:routechange', onLocationChange as any);
+    };
+  }, []);
+
   // Parse deep-link URL on boot (e.g. ?tab=RECORDS&recordId=CR-525541908231)
   useEffect(() => {
     try {
@@ -206,6 +296,7 @@ export default function App() {
 
       if (tabParam === 'RECORDS' || recordParam) {
         setActiveTab('RECORDS');
+        handleNavigate('expedientes', true);
         if (recordParam) {
           setSelectedRecordId(recordParam);
         }
@@ -458,31 +549,45 @@ export default function App() {
     );
   }
 
-  // 2. Unauthenticated Gate: Show Login
+  // 2. Unauthenticated Gate: Show Login, Register, Landing or Protected Psychologists Gate
   if (!currentUser) {
     return (
-      <>
-        <PsychologistLogin
-          onLoginSuccess={(user) => {
-            setCurrentUser(user);
-            if (user.isAdmin || user.email === 'kailabwasd@gmail.com') {
-              setIsCompletingProfile(false);
-            } else {
-              setIsCompletingProfile(!user.profileCompleted || !user.license?.trim());
-            }
-          }}
-          onNeedsProfileCompletion={(draft) => {
-            if (draft.isAdmin || draft.email === 'kailabwasd@gmail.com') {
-              setCurrentUser(draft);
-              setIsCompletingProfile(false);
-            } else {
-              setCurrentUser(draft);
-              setIsCompletingProfile(true);
-            }
-          }}
-        />
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+        {currentRoute === 'psicologos' ? (
+          <main className="flex-1">
+            <PsychologistsDirectoryView
+              currentUser={null}
+              allPsychologists={allPsychologists}
+              onNavigate={handleNavigate}
+            />
+          </main>
+        ) : (
+          <PsychologistLogin
+            initialAuthMode={currentRoute === 'login' ? 'LOGIN' : currentRoute === 'registro' ? 'REGISTER' : 'NONE'}
+            onNavigate={handleNavigate}
+            protectedRouteAttempted={protectedRouteAttempted}
+            onLoginSuccess={(user) => {
+              setCurrentUser(user);
+              if (user.isAdmin || user.email === 'kailabwasd@gmail.com') {
+                setIsCompletingProfile(false);
+              } else {
+                setIsCompletingProfile(!user.profileCompleted || !user.license?.trim());
+              }
+              handleNavigate('triage');
+            }}
+            onNeedsProfileCompletion={(draft) => {
+              if (draft.isAdmin || draft.email === 'kailabwasd@gmail.com') {
+                setCurrentUser(draft);
+                setIsCompletingProfile(false);
+              } else {
+                setCurrentUser(draft);
+                setIsCompletingProfile(true);
+              }
+            }}
+          />
+        )}
         <CookieConsentBanner />
-      </>
+      </div>
     );
   }
 
@@ -496,6 +601,7 @@ export default function App() {
           onProfileSaved={(saved) => {
             setCurrentUser(saved);
             setIsCompletingProfile(false);
+            handleNavigate('triage');
           }}
         />
         <CookieConsentBanner />
@@ -557,9 +663,25 @@ export default function App() {
             className="flex-1 flex space-x-1 sm:space-x-2 pt-2 overflow-x-auto nav-scrollbar text-xs sm:text-sm font-semibold scroll-smooth"
           >
             
+            {/* Directorio de Psicólogos */}
+            <button
+              onClick={() => handleNavigate('psicologos')}
+              className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
+                activeTab === 'PSYCHOLOGISTS'
+                  ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
+                  : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
+              }`}
+            >
+              <Users className="w-4 h-4 text-cyan-400" />
+              <span>Directorio de Psicólogos</span>
+              <span className="text-[11px] px-2 py-0.5 rounded-full font-bold font-mono bg-cyan-900/60 text-cyan-200 border border-cyan-500/30">
+                {allPsychologists.length || 1}
+              </span>
+            </button>
+
             {/* Bandeja General */}
             <button
-              onClick={() => setActiveTab('QUEUE')}
+              onClick={() => handleNavigate('triage')}
               className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
                 activeTab === 'QUEUE'
                   ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
@@ -579,7 +701,7 @@ export default function App() {
 
             {/* Mis Casos Activos */}
             <button
-              onClick={() => setActiveTab('ACTIVE')}
+              onClick={() => handleNavigate('chat')}
               className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
                 activeTab === 'ACTIVE'
                   ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
@@ -597,7 +719,7 @@ export default function App() {
 
             {/* Historial Clínico Firebase */}
             <button
-              onClick={() => setActiveTab('RECORDS')}
+              onClick={() => handleNavigate('expedientes')}
               className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
                 activeTab === 'RECORDS'
                   ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
@@ -610,7 +732,7 @@ export default function App() {
 
             {/* Monitor IA */}
             <button
-              onClick={() => setActiveTab('SUPERVISOR')}
+              onClick={() => handleNavigate('supervisor')}
               className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
                 activeTab === 'SUPERVISOR'
                   ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
@@ -644,6 +766,20 @@ export default function App() {
       {/* 3. Main View Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
         
+        {/* TAB 0: Directorio de Psicólogos (Sub-dominio protegido) */}
+        {activeTab === 'PSYCHOLOGISTS' && (
+          <PsychologistsDirectoryView
+            currentUser={currentUser}
+            allPsychologists={allPsychologists}
+            onNavigate={handleNavigate}
+            onOpenSettings={async () => {
+              const list = await listPsychologistsFromFirestore();
+              setAllPsychologists(list);
+              setIsSettingsOpen(true);
+            }}
+          />
+        )}
+
         {/* TAB 1: Guardia / Cola General */}
         {activeTab === 'QUEUE' && (
           <GeneralQueue
@@ -695,6 +831,36 @@ export default function App() {
             }}
             onPreview={(session) => setPreviewModalSession(session)}
           />
+        )}
+
+        {/* TAB 5: Vista de Inicio Institucional (Sub-dominio público /inicio) */}
+        {activeTab === 'LANDING' && (
+          <div className="space-y-6">
+            <div className="p-4 bg-cyan-950/50 border border-cyan-500/30 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5 text-cyan-200">
+                <Globe className="w-4 h-4 text-cyan-400 shrink-0" />
+                <span>
+                  Portal Institucional de Inicio de MindBridge SubaTECH. Sesión activa: <strong className="text-white">{currentUser?.displayName}</strong>.
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleNavigate('triage')}
+                  className="px-3.5 py-1.5 bg-[#00E5FF] hover:bg-[#00D2F4] text-slate-950 font-bold rounded-xl transition text-[11px] cursor-pointer shadow-sm"
+                >
+                  Ir a Guardia de Triage →
+                </button>
+              </div>
+            </div>
+
+            <PsychologistLogin
+              initialAuthMode="NONE"
+              onNavigate={handleNavigate}
+              onLoginSuccess={() => {}}
+              onNeedsProfileCompletion={() => {}}
+            />
+          </div>
         )}
 
       </main>

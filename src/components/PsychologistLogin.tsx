@@ -56,20 +56,39 @@ const GOOGLE_DRIVE_FOLDER_URL = 'https://drive.google.com/drive/folders/1VeROKtR
 interface PsychologistLoginProps {
   onLoginSuccess: (user: PsychologistAuthUser) => void;
   onNeedsProfileCompletion: (draftUser: PsychologistAuthUser) => void;
+  initialAuthMode?: 'LOGIN' | 'REGISTER' | 'NONE';
+  onNavigate?: (route: string) => void;
+  protectedRouteAttempted?: string | null;
 }
 
 export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({ 
   onLoginSuccess,
-  onNeedsProfileCompletion
+  onNeedsProfileCompletion,
+  initialAuthMode = 'NONE',
+  onNavigate,
+  protectedRouteAttempted,
 }) => {
   // Modal Visibility States
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  const [authTab, setAuthTab] = useState<'LOGIN' | 'REGISTER'>('LOGIN');
+  const [showAuthModal, setShowAuthModal] = useState(initialAuthMode !== 'NONE');
+  const [authTab, setAuthTab] = useState<'LOGIN' | 'REGISTER'>(initialAuthMode === 'REGISTER' ? 'REGISTER' : 'LOGIN');
   const [showLegalModal, setShowLegalModal] = useState(false);
   const [legalTab, setLegalTab] = useState<LegalTabType>('PRIVACY');
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [showGoogleSelector, setShowGoogleSelector] = useState(false);
   const [showGithubSelector, setShowGithubSelector] = useState(false);
+
+  // Sync auth modal visibility with URL route changes
+  useEffect(() => {
+    if (initialAuthMode === 'LOGIN') {
+      setAuthTab('LOGIN');
+      setShowAuthModal(true);
+    } else if (initialAuthMode === 'REGISTER') {
+      setAuthTab('REGISTER');
+      setShowAuthModal(true);
+    } else if (initialAuthMode === 'NONE') {
+      setShowAuthModal(false);
+    }
+  }, [initialAuthMode]);
 
   // Form & Authentication States
   const [acceptedTerms, setAcceptedTerms] = useState(true);
@@ -393,6 +412,7 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
                   setAuthTab('LOGIN');
                   setErrorMessage(null);
                   setShowAuthModal(true);
+                  if (onNavigate) onNavigate('login');
                 }}
                 className="px-5 py-2.5 rounded-xl font-bold text-xs bg-[#00E5FF] hover:bg-[#00D2F4] text-slate-950 shadow-lg shadow-cyan-500/20 flex items-center gap-2 transition active:scale-95 cursor-pointer"
               >
@@ -406,6 +426,7 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
                   setAuthTab('REGISTER');
                   setErrorMessage(null);
                   setShowAuthModal(true);
+                  if (onNavigate) onNavigate('registro');
                 }}
                 className="px-5 py-2.5 rounded-xl font-bold text-xs bg-slate-800 hover:bg-slate-750 text-white border border-slate-700 hover:border-emerald-500/50 flex items-center gap-2 transition active:scale-95 cursor-pointer"
               >
@@ -414,6 +435,29 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
               </button>
             </div>
           </div>
+
+          {/* Banner de ruta protegida si intentó ingresar a un sub-dominio protegido */}
+          {protectedRouteAttempted && (
+            <div className="p-3.5 bg-amber-950/70 border border-amber-500/40 rounded-2xl text-xs text-amber-200 flex items-center justify-between gap-3 animate-in fade-in">
+              <div className="flex items-center gap-2.5">
+                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>
+                  <strong>Sub-dominio Protegido:</strong> Para acceder a <strong className="text-white font-mono">/{protectedRouteAttempted}</strong> debes identificarte con tu cuenta de especialista.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthTab('LOGIN');
+                  setShowAuthModal(true);
+                  if (onNavigate) onNavigate('login');
+                }}
+                className="px-3 py-1 bg-amber-500 text-slate-950 font-bold rounded-lg hover:bg-amber-400 transition text-[11px] shrink-0 cursor-pointer"
+              >
+                Ingresar Ahora
+              </button>
+            </div>
+          )}
 
           <div className="max-w-4xl space-y-4">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyan-950/60 border border-cyan-500/40 text-cyan-300 text-xs font-semibold">
@@ -650,8 +694,12 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
               
               <button
                 type="button"
-                onClick={() => setShowAuthModal(false)}
+                onClick={() => {
+                  setShowAuthModal(false);
+                  if (onNavigate) onNavigate('inicio');
+                }}
                 className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+                title="Cerrar y volver a Inicio"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -668,6 +716,7 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
                     setAuthTab('LOGIN');
                     setRequires2FA(false);
                     setErrorMessage(null);
+                    if (onNavigate) onNavigate('login');
                   }}
                   className={`py-2 rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer ${
                     authTab === 'LOGIN'
@@ -685,6 +734,7 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
                     setAuthTab('REGISTER');
                     setRequires2FA(false);
                     setErrorMessage(null);
+                    if (onNavigate) onNavigate('registro');
                   }}
                   className={`py-2 rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer ${
                     authTab === 'REGISTER'
