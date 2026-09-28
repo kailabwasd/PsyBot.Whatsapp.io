@@ -58,6 +58,30 @@ html.access-dark-mode, html.access-dark-mode body {
   color: #F1F5F9 !important;
 }
 
+html.access-dark-mode .bg-white,
+html.access-dark-mode [class*="bg-slate-50"],
+html.access-dark-mode [class*="bg-slate-100"],
+html.access-dark-mode [class*="bg-[#F0F4F8]"] {
+  background-color: #111827 !important;
+  color: #F3F4F6 !important;
+  border-color: #1F2937 !important;
+}
+
+html.access-dark-mode .text-\[\#0B2545\],
+html.access-dark-mode .text-slate-900,
+html.access-dark-mode .text-slate-800,
+html.access-dark-mode .text-slate-700 {
+  color: #F9FAFB !important;
+}
+
+html.access-dark-mode input,
+html.access-dark-mode select,
+html.access-dark-mode textarea {
+  background-color: #030712 !important;
+  color: #F9FAFB !important;
+  border-color: #374151 !important;
+}
+
 html.access-bold-text *, html.access-bold-text body {
   font-weight: 700 !important;
 }
