@@ -161,3 +161,48 @@ export function subscribeToClinicalRecords(callback: (records: ClinicalRecord[])
     console.warn('Real-time subscription warning:', error);
   });
 }
+
+const SESSIONS_COLLECTION = 'active_sessions';
+
+/**
+ * Save an active patient chat session to Firestore
+ */
+export async function saveActiveSessionToFirestore(session: PatientSession): Promise<void> {
+  try {
+    const normalizedId = session.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const docRef = doc(db, SESSIONS_COLLECTION, normalizedId);
+    await setDoc(docRef, {
+      ...session,
+      lastActivityAt: Date.now(),
+    }, { merge: true });
+  } catch (err) {
+    console.error('Error saving active session to Firestore:', err);
+  }
+}
+
+/**
+ * Fetch all active patient chat sessions from Firestore
+ */
+export async function getActiveSessionsFromFirestore(): Promise<PatientSession[]> {
+  try {
+    const q = query(collection(db, SESSIONS_COLLECTION), orderBy('lastActivityAt', 'desc'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((docSnap) => docSnap.data() as PatientSession);
+  } catch (err) {
+    console.error('Error fetching active sessions from Firestore:', err);
+    return [];
+  }
+}
+
+/**
+ * Listen to real-time changes in Firestore active sessions
+ */
+export function subscribeToActiveSessions(callback: (sessions: PatientSession[]) => void): () => void {
+  const q = query(collection(db, SESSIONS_COLLECTION), orderBy('lastActivityAt', 'desc'));
+  return onSnapshot(q, (snapshot) => {
+    const sessions = snapshot.docs.map((d) => d.data() as PatientSession);
+    callback(sessions);
+  }, (error) => {
+    console.warn('Active sessions subscription warning:', error);
+  });
+}

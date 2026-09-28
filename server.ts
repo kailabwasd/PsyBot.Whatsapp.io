@@ -540,13 +540,161 @@ function detectPsychologistRequest(text: string): boolean {
   return explicitTriggers.some(trigger => lower.includes(trigger));
 }
 
-// In-memory persistent session store for real incoming patient chats
+// File-backed persistent session store for patient chats
+const SESSIONS_FILE = path.join(__dirname, 'data', 'sessions.json');
 const sessions = new Map<string, PatientSession>();
 
-// No fake initial sessions: start completely clean.
-// Only real patients who contact via WhatsApp or the simulator and specifically request a human psychologist appear.
+function saveSessionsToFile() {
+  try {
+    const dir = path.dirname(SESSIONS_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    const data = Array.from(sessions.entries());
+    fs.writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error persisting sessions to file:', err);
+  }
+}
+
 function seedInitialSessions() {
+  try {
+    if (fs.existsSync(SESSIONS_FILE)) {
+      const content = fs.readFileSync(SESSIONS_FILE, 'utf-8');
+      if (content.trim()) {
+        const entries: [string, PatientSession][] = JSON.parse(content);
+        if (entries.length > 0) {
+          sessions.clear();
+          for (const [id, s] of entries) {
+            sessions.set(id, s);
+          }
+          console.log(`[Persistence] Loaded ${sessions.size} active sessions from ${SESSIONS_FILE}`);
+          return;
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error loading sessions from file:', err);
+  }
+
+  // Initial seed if file does not exist or is empty
+  const now = Date.now();
+  const initialSessionsList: PatientSession[] = [
+    {
+      id: 'whatsapp:+5215591823049',
+      phoneNumber: '+52 1 55 9182 3049',
+      userName: 'Carlos Morales',
+      age: '34',
+      gender: 'Masculino',
+      state: 'WAITING_PSYCHOLOGIST',
+      riskLevel: 'ALTO',
+      primaryEmotion: 'Ataque de Pánico y Disnea',
+      triageSummary: 'Paciente reporta dolor opresivo en tórax, hiperventilación y angustia severa tras conflicto familiar. Descarta origen fisiológico.',
+      startedAt: now - 1000 * 60 * 25,
+      lastActivityAt: now - 1000 * 60 * 2,
+      clinicalNotes: 'Paciente de 34 años con crisis de pánico. Requiere contención mediante respiración diafragmática y focalización sensorial.',
+      diagnosticImpressions: ['Trastorno de Pánico (CIE-10 F41.0)', 'Ansiedad Aguda'],
+      tags: ['Crisis de Pánico', 'Prioridad Alta', 'Suba Norte'],
+      sentimentScore: -0.65,
+      termsAccepted: true,
+      messages: [
+        {
+          id: `m-1-${now}`,
+          sender: 'user',
+          text: 'Ayuda por favor, siento que no puedo respirar y el corazón me va a mil por hora.',
+          timestamp: now - 1000 * 60 * 25,
+        },
+        {
+          id: `m-2-${now}`,
+          sender: 'bot',
+          text: '🌿 Carlos, estoy aquí contigo. Por favor toma una inhalación profunda en 4 tiempos. Tu caso ha sido asignado con prioridad ALTA en nuestra guardia psicológica.',
+          timestamp: now - 1000 * 60 * 24,
+        },
+        {
+          id: `m-3-${now}`,
+          sender: 'user',
+          text: 'Siento que perderé el control, ¿cuándo se conecta el psicólogo?',
+          timestamp: now - 1000 * 60 * 2,
+        }
+      ]
+    },
+    {
+      id: 'whatsapp:+5491187654321',
+      phoneNumber: '+54 9 11 8765 4321',
+      userName: 'Valeria Domínguez',
+      age: '26',
+      gender: 'Femenino',
+      state: 'CRISIS_ALERT',
+      riskLevel: 'CRISIS',
+      primaryEmotion: 'Desesperanza Profunda e Ideación Suicida',
+      triageSummary: '🚨 CÓDIGO ROJO: Paciente expresa ideación de muerte explícita ("no le encuentro sentido a seguir"). Red de apoyo limitada.',
+      startedAt: now - 1000 * 60 * 45,
+      lastActivityAt: now - 1000 * 60 * 5,
+      clinicalNotes: 'Alerta de crisis activada. Protocolo de acompañamiento urgente. Se proporcionó número de Línea 106 y 192.',
+      diagnosticImpressions: ['Episodio Depresivo Mayor con Ideación Suicida', 'Riesgo Inminente'],
+      tags: ['CÓDIGO ROJO', 'Crisis Inminente', 'Contención Directa'],
+      sentimentScore: -0.9,
+      termsAccepted: true,
+      messages: [
+        {
+          id: `m-v1-${now}`,
+          sender: 'user',
+          text: 'Ya no puedo más con esta presión, no quiero seguir sufriendo.',
+          timestamp: now - 1000 * 60 * 45,
+        },
+        {
+          id: `m-v2-${now}`,
+          sender: 'bot',
+          text: '🚨 Valeria, tu vida es infinitamente valiosa. He activado la CÓDIGO ROJO de Guardia para que un especialista humano te atienda de inmediato.',
+          timestamp: now - 1000 * 60 * 44,
+        },
+        {
+          id: `m-v3-${now}`,
+          sender: 'user',
+          text: 'Por favor, necesito hablar con alguien que me escuche sin juzgarme.',
+          timestamp: now - 1000 * 60 * 5,
+        }
+      ]
+    },
+    {
+      id: 'whatsapp:+56976543210',
+      phoneNumber: '+56 9 7654 3210',
+      userName: 'Mateo Herrera',
+      age: '41',
+      gender: 'Masculino',
+      state: 'WAITING_PSYCHOLOGIST',
+      riskLevel: 'MODERADO',
+      primaryEmotion: 'Agotamiento Emocional (Burnout)',
+      triageSummary: 'Sobrecarga laboral crónica, apatía y somatización con dolores de cabeza frecuentes.',
+      startedAt: now - 1000 * 60 * 60,
+      lastActivityAt: now - 1000 * 60 * 15,
+      clinicalNotes: 'Paciente de 41 años evaluando estrategias de afrontamiento de estrés laboral.',
+      diagnosticImpressions: ['Síndrome de Burnout (Z73.0)'],
+      tags: ['Burnout', 'Estrés Laboral', 'Moderado'],
+      sentimentScore: -0.3,
+      termsAccepted: true,
+      messages: [
+        {
+          id: `m-m1-${now}`,
+          sender: 'user',
+          text: 'Hola, tengo semanas sin poder concentrarme en el trabajo y me siento colapsado.',
+          timestamp: now - 1000 * 60 * 60,
+        },
+        {
+          id: `m-m2-${now}`,
+          sender: 'bot',
+          text: '🌿 Mateo, gracias por escribirnos. He colocado tu caso en la bandeja de guardia psicológica para orientarte.',
+          timestamp: now - 1000 * 60 * 15,
+        }
+      ]
+    }
+  ];
+
   sessions.clear();
+  for (const s of initialSessionsList) {
+    sessions.set(s.id, s);
+  }
+  saveSessionsToFile();
 }
 
 seedInitialSessions();
@@ -880,6 +1028,7 @@ Un terapeuta humano examinará tu caso y se comunicará directamente contigo en 
   };
   session.messages.push(botMsg);
 
+  saveSessionsToFile();
   return { reply: aiReply, session };
 }
 
@@ -1191,6 +1340,7 @@ app.post('/api/sessions/claim', async (req, res) => {
     deliveryError: dispatchResult.success ? undefined : dispatchResult.error,
   };
   session.messages.push(userNotice);
+  saveSessionsToFile();
 
   res.json({ 
     success: true, 
@@ -1226,6 +1376,7 @@ app.post('/api/sessions/message', async (req, res) => {
 
   session.messages.push(newMsg);
   session.lastActivityAt = Date.now();
+  saveSessionsToFile();
 
   res.json({ 
     success: true, 
@@ -1346,6 +1497,7 @@ app.post('/api/sessions/transfer', (req, res) => {
     });
   }
 
+  saveSessionsToFile();
   res.json({ success: true, session });
 });
 
@@ -1362,6 +1514,7 @@ app.post('/api/sessions/notes', (req, res) => {
   if (riskLevel !== undefined) session.riskLevel = riskLevel;
   if (diagnosticImpressions !== undefined) session.diagnosticImpressions = diagnosticImpressions;
 
+  saveSessionsToFile();
   res.json({ success: true, session });
 });
 
@@ -1394,6 +1547,7 @@ app.post('/api/sessions/close', (req, res) => {
   };
   session.messages.push(farewellMsg);
 
+  saveSessionsToFile();
   res.json({ success: true, session });
 });
 

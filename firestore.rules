@@ -13,5 +13,9 @@ service cloud.firestore {
     match /psychologists/{userId} {
       allow read, write: if true;
     }
+
+    match /active_sessions/{sessionId} {
+      allow read, write: if true;
+    }
   }
 }

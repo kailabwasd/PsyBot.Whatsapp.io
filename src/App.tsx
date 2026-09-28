@@ -40,7 +40,12 @@ import { LegalTermsModal, LegalTabType } from './components/LegalTermsModal.tsx'
 import { NotificationToastContainer } from './components/NotificationToast.tsx';
 import { PsychologistsDirectoryView } from './components/PsychologistsDirectoryView.tsx';
 import { PatientRegistrationModal } from './components/PatientRegistrationModal.tsx';
-import { syncSessionToFirestoreClinicalRecord } from './lib/clinicalRecordsService.ts';
+import { 
+  syncSessionToFirestoreClinicalRecord, 
+  saveActiveSessionToFirestore, 
+  getActiveSessionsFromFirestore, 
+  subscribeToActiveSessions 
+} from './lib/clinicalRecordsService.ts';
 import { AppRoute, parseCurrentRoute, navigateTo, normalizeRoute } from './lib/router.ts';
 import { applyAccessibilitySettings, getStoredAccessibilitySettings } from './lib/accessibility.ts';
 import { 
@@ -90,7 +95,20 @@ export default function App() {
     return 'QUEUE';
   });
   const [sessions, setSessions] = useState<PatientSession[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('psybot_active_session_id') || null;
+    }
+    return null;
+  });
+
+  // Keep activeSessionId persisted in localStorage
+  useEffect(() => {
+    if (activeSessionId) {
+      localStorage.setItem('psybot_active_session_id', activeSessionId);
+    }
+  }, [activeSessionId]);
+
   const [reportModalSession, setReportModalSession] = useState<PatientSession | null>(null);
   const [previewModalSession, setPreviewModalSession] = useState<PatientSession | null>(null);
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
@@ -128,7 +146,9 @@ export default function App() {
     };
 
     await syncSessionToFirestoreClinicalRecord(newSession);
+    await saveActiveSessionToFirestore(newSession);
     setSessions((prev) => [newSession, ...prev.filter(s => s.id !== newSession.id)]);
+    setActiveSessionId(newSession.id);
     setActiveTab('QUEUE');
   };
   const navContainerRef = useRef<HTMLElement | null>(null);
@@ -381,15 +401,94 @@ export default function App() {
     }
   }, []);
 
-  // Sync sessions from backend periodically and detect events for notifications
+  // Subscribe to real-time active sessions from Firestore
+  useEffect(() => {
+    const unsubscribe = subscribeToActiveSessions((firestoreSessions) => {
+      if (!firestoreSessions || firestoreSessions.length === 0) return;
+      setSessions((prev) => {
+        const map = new Map<string, PatientSession>();
+        for (const p of prev) {
+          if (p && p.id) map.set(p.id, p);
+        }
+        for (const fsSes of firestoreSessions) {
+          if (!fsSes || !fsSes.id) continue;
+          const existing = map.get(fsSes.id);
+          // Prefer whichever session has more messages or newer activity
+          if (!existing || (fsSes.messages && fsSes.messages.length >= (existing.messages?.length || 0))) {
+            map.set(fsSes.id, fsSes);
+          }
+        }
+        const updatedList = Array.from(map.values()).sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0));
+        try {
+          localStorage.setItem('psybot_active_sessions_cache', JSON.stringify(updatedList));
+        } catch (e) {}
+        return updatedList;
+      });
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Sync sessions from backend + Firestore periodically and preserve active session context
   const loadSessions = async () => {
-    const list = await fetchSessions();
+    const [apiList, firestoreList] = await Promise.all([
+      fetchSessions().catch(() => []),
+      getActiveSessionsFromFirestore().catch(() => [])
+    ]);
+
+    const sessionMap = new Map<string, PatientSession>();
+
+    // 1. Load Firestore sessions first
+    for (const fsSes of firestoreList) {
+      if (fsSes && fsSes.id) {
+        sessionMap.set(fsSes.id, fsSes);
+      }
+    }
+
+    // 2. Merge API sessions
+    for (const apiSes of apiList) {
+      if (apiSes && apiSes.id) {
+        const existing = sessionMap.get(apiSes.id);
+        if (!existing || (apiSes.messages && apiSes.messages.length >= (existing.messages?.length || 0))) {
+          sessionMap.set(apiSes.id, apiSes);
+        }
+      }
+    }
+
+    let list = Array.from(sessionMap.values()).sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0));
+
+    // 3. Fallback to LocalStorage cache if remote returned empty
+    if (list.length === 0) {
+      try {
+        const cached = localStorage.getItem('psybot_active_sessions_cache');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            list = parsed;
+          }
+        }
+      } catch (e) {
+        console.warn('LocalStorage load error:', e);
+      }
+    } else {
+      try {
+        localStorage.setItem('psybot_active_sessions_cache', JSON.stringify(list));
+      } catch (e) {
+        console.warn('LocalStorage save error:', e);
+      }
+    }
+
     setSessions(list);
 
-    if (!activeSessionId && list.length > 0) {
+    // 4. Restore activeSessionId from localStorage or url or first available session
+    const savedActiveId = localStorage.getItem('psybot_active_session_id');
+    if (savedActiveId && list.some(s => s.id === savedActiveId)) {
+      setActiveSessionId(savedActiveId);
+    } else if (!activeSessionId && list.length > 0) {
       const firstHuman = list.find((s) => s.state === 'HUMAN_MODE');
       if (firstHuman) {
         setActiveSessionId(firstHuman.id);
+      } else {
+        setActiveSessionId(list[0].id);
       }
     }
 
@@ -541,6 +640,8 @@ export default function App() {
     if (!currentUser) return;
     try {
       const updated = await claimSession(session.id, currentUser.uid, currentUser.displayName);
+      await saveActiveSessionToFirestore(updated);
+      await syncSessionToFirestoreClinicalRecord(updated);
       setSessions((prev) => prev.map((s) => (s.id === session.id ? updated : s)));
       setActiveSessionId(session.id);
       setActiveTab('ACTIVE');
@@ -553,6 +654,8 @@ export default function App() {
     if (!currentUser) return;
     try {
       const updated = await sendPsychologistMessage(sessionId, text, currentUser.displayName);
+      await saveActiveSessionToFirestore(updated);
+      await syncSessionToFirestoreClinicalRecord(updated);
       setSessions((prev) => prev.map((s) => (s.id === sessionId ? updated : s)));
     } catch (e) {
       console.error('Error sending message:', e);
@@ -562,6 +665,8 @@ export default function App() {
   const handleTransfer = async (sessionId: string, target: 'AI_MODE' | 'WAITING_PSYCHOLOGIST') => {
     try {
       const updated = await transferSession(sessionId, target);
+      await saveActiveSessionToFirestore(updated);
+      await syncSessionToFirestoreClinicalRecord(updated);
       setSessions((prev) => prev.map((s) => (s.id === sessionId ? updated : s)));
       if (sessionId === activeSessionId && target === 'AI_MODE') {
         const next = sessions.find((s) => s.id !== sessionId && s.state === 'HUMAN_MODE');
@@ -583,6 +688,8 @@ export default function App() {
   ) => {
     try {
       const updated = await saveClinicalNotes(sessionId, data);
+      await saveActiveSessionToFirestore(updated);
+      await syncSessionToFirestoreClinicalRecord(updated);
       setSessions((prev) => prev.map((s) => (s.id === sessionId ? updated : s)));
     } catch (e) {
       console.error('Error saving notes:', e);
@@ -592,6 +699,8 @@ export default function App() {
   const handleCloseSession = async (sessionId: string, resolutionNotes: string) => {
     try {
       const updated = await closeSession(sessionId, resolutionNotes);
+      await saveActiveSessionToFirestore(updated);
+      await syncSessionToFirestoreClinicalRecord(updated);
       setSessions((prev) => prev.map((s) => (s.id === sessionId ? updated : s)));
       const next = sessions.find((s) => s.id !== sessionId && s.state === 'HUMAN_MODE');
       setActiveSessionId(next ? next.id : null);
