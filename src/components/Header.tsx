@@ -213,11 +213,7 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="relative">
                 <button
                   onClick={() => setDropdownOpen(!dropdownOpen)}
-                  className={`flex items-center space-x-2.5 px-3 py-1.5 rounded-xl border transition shadow-sm bg-white hover:bg-slate-50 ${
-                    currentUser.isAdmin || currentUser.email === 'kailabwasd@gmail.com'
-                      ? 'border-amber-400 ring-2 ring-amber-300/40'
-                      : 'border-slate-300 hover:border-slate-400'
-                  }`}
+                  className="flex items-center space-x-2.5 px-3 py-1.5 rounded-xl border border-slate-300 hover:border-slate-400 transition shadow-sm bg-white hover:bg-slate-50 cursor-pointer"
                 >
                   <img
                     src={currentUser.photoURL || 'https://images.unsplash.com/photo-1594824813576-a05e263d9061?w=150&auto=format&fit=crop&q=80'}
@@ -225,11 +221,8 @@ export const Header: React.FC<HeaderProps> = ({
                     className="w-8 h-8 rounded-lg object-cover ring-1 ring-slate-200"
                   />
                   <div className="text-left hidden sm:block max-w-[150px]">
-                    <div className="text-xs font-bold text-slate-900 leading-tight truncate flex items-center gap-1">
-                      <span>{currentUser.displayName}</span>
-                      {(currentUser.isAdmin || currentUser.email === 'kailabwasd@gmail.com') && (
-                        <span className="text-[10px]" title="Super Administrador">👑</span>
-                      )}
+                    <div className="text-xs font-bold text-slate-900 leading-tight truncate">
+                      {currentUser.displayName}
                     </div>
                     <div className="text-[10px] text-emerald-700 font-mono leading-tight truncate flex items-center gap-1 font-semibold">
                       <Award className="w-2.5 h-2.5 shrink-0 text-amber-600" />

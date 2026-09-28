@@ -90,17 +90,6 @@ export function createAdminProfile(email = 'kailabwasd@gmail.com', name?: string
   };
 }
 
-export async function loginAsAdmin(customEmail = 'kailabwasd@gmail.com'): Promise<PsychologistAuthUser> {
-  const adminUser = createAdminProfile(customEmail);
-  localStorage.setItem('subatech_psychologist_session', JSON.stringify(adminUser));
-  localStorage.setItem('psybot_psychologist_session', JSON.stringify(adminUser));
-  try {
-    const userDocRef = doc(db, 'psychologists', adminUser.uid);
-    setDoc(userDocRef, adminUser, { merge: true }).catch(() => {});
-  } catch {}
-  return adminUser;
-}
-
 // Test Firestore Connection in background without blocking execution
 export function testFirestoreConnection() {
   try {
@@ -329,6 +318,46 @@ export async function signInWithGithub(): Promise<{ user: PsychologistAuthUser; 
   } finally {
     isSigningIn = false;
   }
+}
+
+/**
+ * Sign in Psychologist directly with GitHub username/email
+ */
+export async function signInWithGithubDirect(githubHandleOrEmail: string, displayName?: string): Promise<{ user: PsychologistAuthUser; isNewOrIncomplete: boolean }> {
+  const cleanInput = githubHandleOrEmail.trim().replace(/^@/, '');
+  const isEmail = cleanInput.includes('@');
+  const email = isEmail ? cleanInput.toLowerCase() : `${cleanInput.toLowerCase()}@users.noreply.github.com`;
+  const name = displayName || cleanInput;
+  const uid = `github-${cleanInput.toLowerCase().replace(/[^a-zA-Z0-9]/g, '_')}`;
+
+  const existing = await getPsychologistFromFirestore(uid);
+
+  if (existing && existing.profileCompleted && existing.license?.trim()) {
+    localStorage.setItem('subatech_psychologist_session', JSON.stringify(existing));
+    localStorage.setItem('psybot_psychologist_session', JSON.stringify(existing));
+    return { user: existing, isNewOrIncomplete: false };
+  }
+
+  const draftUser: PsychologistAuthUser = {
+    uid,
+    email,
+    displayName: name,
+    photoURL: `https://github.com/${cleanInput.split('@')[0]}.png`,
+    provider: 'github.com',
+    role: existing?.role || 'Psicólogo(a) Especialista en Intervención',
+    license: existing?.license || '',
+    specialty: existing?.specialty || 'Psicoterapia Cognitivo-Conductual & Urgencias',
+    institution: existing?.institution || 'Subred Integrada de Servicios de Salud Norte - Suba',
+    phone: existing?.phone || '',
+    termsAccepted: existing?.termsAccepted ?? true,
+    profileCompleted: false,
+    createdAt: existing?.createdAt || Date.now(),
+    lastLoginAt: Date.now(),
+  };
+
+  localStorage.setItem('subatech_psychologist_session', JSON.stringify(draftUser));
+  localStorage.setItem('psybot_psychologist_session', JSON.stringify(draftUser));
+  return { user: draftUser, isNewOrIncomplete: true };
 }
 
 /**
