@@ -39,6 +39,8 @@ import { SubaTechLogo } from './components/SubaTechLogo.tsx';
 import { LegalTermsModal, LegalTabType } from './components/LegalTermsModal.tsx';
 import { NotificationToastContainer } from './components/NotificationToast.tsx';
 import { PsychologistsDirectoryView } from './components/PsychologistsDirectoryView.tsx';
+import { PatientRegistrationModal } from './components/PatientRegistrationModal.tsx';
+import { syncSessionToFirestoreClinicalRecord } from './lib/clinicalRecordsService.ts';
 import { AppRoute, parseCurrentRoute, navigateTo, normalizeRoute } from './lib/router.ts';
 import { applyAccessibilitySettings, getStoredAccessibilitySettings } from './lib/accessibility.ts';
 import { 
@@ -92,7 +94,43 @@ export default function App() {
   const [reportModalSession, setReportModalSession] = useState<PatientSession | null>(null);
   const [previewModalSession, setPreviewModalSession] = useState<PatientSession | null>(null);
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [isRegistrationModalOpen, setIsRegistrationModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  const handleRegisterNewPatient = async (data: { name: string; age: number; gender: string; phone: string }) => {
+    const now = Date.now();
+    const cleanPhone = data.phone.startsWith('whatsapp:') ? data.phone : `whatsapp:${data.phone.startsWith('+') ? data.phone : '+' + data.phone}`;
+    const newSession: PatientSession = {
+      id: cleanPhone,
+      phoneNumber: data.phone,
+      userName: data.name,
+      age: String(data.age),
+      gender: data.gender,
+      state: 'WAITING_PSYCHOLOGIST',
+      riskLevel: 'MODERADO',
+      primaryEmotion: 'Solicitud de Atención Inicial',
+      triageSummary: `Paciente ${data.name}, ${data.age} años (${data.gender}), registrado en guardia con teléfono ${data.phone}.`,
+      startedAt: now,
+      lastActivityAt: now,
+      messages: [
+        {
+          id: `reg-${now}`,
+          sender: 'bot',
+          text: `🌿 ¡Hola ${data.name}! Tu registro en SubaTECH Triage se ha completado exitosamente. Un psicólogo humano especialista revisará tu caso en breve.`,
+          timestamp: now,
+        }
+      ],
+      clinicalNotes: `Registro inicial de paciente en guardia. Edad: ${data.age}, Género: ${data.gender}, Teléfono: ${data.phone}.`,
+      diagnosticImpressions: ['Admisión Inicial a Guardia'],
+      tags: ['Nuevo Paciente', data.gender, `${data.age} años`],
+      sentimentScore: 0,
+      termsAccepted: true,
+    };
+
+    await syncSessionToFirestoreClinicalRecord(newSession);
+    setSessions((prev) => [newSession, ...prev.filter(s => s.id !== newSession.id)]);
+    setActiveTab('QUEUE');
+  };
   const navContainerRef = useRef<HTMLElement | null>(null);
 
   // Notification states and references
@@ -640,12 +678,12 @@ export default function App() {
   const getThemeClasses = () => {
     switch (themeMode) {
       case 'dark':
-        return 'min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-cyan-200 selection:text-slate-900';
+        return 'min-h-screen bg-[#0B0F19] text-slate-100 font-bold flex flex-col font-sans selection:bg-cyan-500 selection:text-slate-950';
       case 'light':
-        return 'min-h-screen bg-[#FDF6F0] text-slate-900 flex flex-col font-sans selection:bg-amber-200 selection:text-slate-900';
+        return 'min-h-screen bg-[#FDF6F0] text-slate-900 font-bold flex flex-col font-sans selection:bg-amber-200 selection:text-slate-900';
       case 'subatech':
       default:
-        return 'min-h-screen bg-[#F0F4F8] text-slate-800 flex flex-col font-sans selection:bg-amber-300/60 selection:text-[#0B2545]';
+        return 'min-h-screen bg-[#F0F4F8] text-slate-900 font-bold flex flex-col font-sans selection:bg-amber-300/60 selection:text-[#0B2545]';
     }
   };
 
@@ -836,6 +874,7 @@ export default function App() {
               setSelectedRecordId(recordId);
               setActiveTab('RECORDS');
             }}
+            onOpenRegisterModal={() => setIsRegistrationModalOpen(true)}
           />
         )}
 
@@ -1191,6 +1230,13 @@ export default function App() {
       <AccessibilityModal
         isOpen={isAccessibilityOpen}
         onClose={() => setIsAccessibilityOpen(false)}
+      />
+
+      {/* Patient Registration Modal with Real-time Validation */}
+      <PatientRegistrationModal
+        isOpen={isRegistrationModalOpen}
+        onClose={() => setIsRegistrationModalOpen(false)}
+        onRegister={handleRegisterNewPatient}
       />
 
     </div>

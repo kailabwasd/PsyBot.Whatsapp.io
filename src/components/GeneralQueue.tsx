@@ -19,6 +19,7 @@ interface GeneralQueueProps {
   onClaim: (session: PatientSession) => void;
   onPreview: (session: PatientSession) => void;
   onOpenRecord?: (recordId: string) => void;
+  onOpenRegisterModal?: () => void;
 }
 
 export const GeneralQueue: React.FC<GeneralQueueProps> = ({
@@ -26,6 +27,7 @@ export const GeneralQueue: React.FC<GeneralQueueProps> = ({
   onClaim,
   onPreview,
   onOpenRecord,
+  onOpenRegisterModal,
 }) => {
   const [filterRisk, setFilterRisk] = useState<string>('ALL');
 
@@ -105,6 +107,15 @@ export const GeneralQueue: React.FC<GeneralQueueProps> = ({
 
           {/* Quick Filters / Counts */}
           <div className="flex flex-wrap items-center gap-2">
+            {onOpenRegisterModal && (
+              <button
+                onClick={onOpenRegisterModal}
+                className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-teal-500 hover:bg-teal-400 text-slate-950 transition flex items-center gap-1.5 shadow-lg shadow-teal-500/20 cursor-pointer"
+              >
+                <span>+ Registrar Paciente</span>
+              </button>
+            )}
+
             <button
               onClick={() => setFilterRisk('ALL')}
               className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 ${

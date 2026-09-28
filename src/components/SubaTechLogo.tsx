@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface SubaTechLogoProps {
   className?: string;
@@ -13,6 +13,51 @@ export const SubaTechLogo: React.FC<SubaTechLogoProps> = ({
   showTagline = true,
   theme = 'auto',
 }) => {
+  const [resolvedIsLight, setResolvedIsLight] = useState<boolean>(() => {
+    if (theme === 'light') return true;
+    if (theme === 'dark') return false;
+    if (typeof document !== 'undefined') {
+      return !document.documentElement.classList.contains('access-dark-mode');
+    }
+    return true;
+  });
+
+  useEffect(() => {
+    if (theme === 'light') {
+      setResolvedIsLight(true);
+      return;
+    }
+    if (theme === 'dark') {
+      setResolvedIsLight(false);
+      return;
+    }
+
+    // Auto check from DOM / localStorage
+    const updateThemeCheck = () => {
+      const isDarkModeActive = document.documentElement.classList.contains('access-dark-mode');
+      const savedSettings = localStorage.getItem('psybot_accessibility_settings');
+      let isDarkSetting = false;
+      if (savedSettings) {
+        try {
+          const parsed = JSON.parse(savedSettings);
+          if (parsed.darkMode) isDarkSetting = true;
+        } catch (e) {}
+      }
+      setResolvedIsLight(!isDarkModeActive && !isDarkSetting);
+    };
+
+    updateThemeCheck();
+
+    const handleStorageChange = () => updateThemeCheck();
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('applet:accessibilitychange', handleStorageChange as EventListener);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('applet:accessibilitychange', handleStorageChange as EventListener);
+    };
+  }, [theme]);
+
   // Dimension scales
   const scale = {
     sm: { height: 28, textMain: 'text-lg', psybot: 'text-lg', tagline: 'text-[9px]' },
@@ -21,34 +66,32 @@ export const SubaTechLogo: React.FC<SubaTechLogoProps> = ({
     xl: { height: 68, textMain: 'text-4xl sm:text-5xl', psybot: 'text-4xl sm:text-5xl', tagline: 'text-sm sm:text-base' },
   }[size];
 
-  const isLight = theme === 'light';
-
   return (
     <div className={`inline-flex flex-col select-none ${className}`}>
       <div className="flex items-center gap-2 font-black tracking-tight leading-none">
         
         {/* "Psybot" Brand */}
         <div className="flex items-center">
-          <span className={`${scale.psybot} font-black text-white`}>Psy</span>
+          <span className={`${scale.psybot} font-black ${resolvedIsLight ? 'text-[#0B2545]' : 'text-white'}`}>Psy</span>
           <span className={`${scale.psybot} font-black text-[#00E5FF] drop-shadow-[0_0_12px_rgba(0,229,255,0.4)]`}>bot</span>
         </div>
 
         {/* Separator */}
-        <span className="text-slate-600 text-sm font-semibold">/</span>
+        <span className={`${resolvedIsLight ? 'text-slate-500' : 'text-slate-400'} text-sm font-bold`}>/</span>
 
         {/* SubaTECH Logo */}
         <div className="flex items-center font-black tracking-tight leading-none">
           {/* "Suba" */}
           <span
             className={`${scale.textMain} font-extrabold transition-colors ${
-              isLight ? 'text-[#413e55]' : 'text-slate-300'
+              resolvedIsLight ? 'text-[#0B2545]' : 'text-slate-100'
             }`}
             style={{ letterSpacing: '-0.03em' }}
           >
             Suba
           </span>
 
-          {/* "T" in Cyan */}
+          {/* "T" in Cyan / Clear */}
           <span
             className={`${scale.textMain} font-black text-[#00E5FF]`}
             style={{ textShadow: '0 0 20px rgba(0,229,255,0.3)' }}
@@ -90,8 +133,8 @@ export const SubaTechLogo: React.FC<SubaTechLogoProps> = ({
       {/* Tagline: "Cocreando la Suba del futuro" */}
       {showTagline && (
         <span
-          className={`${scale.tagline} font-medium tracking-[0.22em] mt-1 ${
-            isLight ? 'text-[#58556D]' : 'text-slate-400'
+          className={`${scale.tagline} font-bold tracking-[0.22em] mt-1 ${
+            resolvedIsLight ? 'text-slate-700' : 'text-slate-300'
           }`}
           style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}
         >

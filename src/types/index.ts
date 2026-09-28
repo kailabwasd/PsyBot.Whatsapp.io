@@ -25,6 +25,8 @@ export interface PatientSession {
   id: string; // phone number e.g. "whatsapp:+5215512345678" or identifier
   phoneNumber: string;
   userName: string;
+  age?: string;
+  gender?: string;
   state: SessionState;
   riskLevel: RiskLevel;
   primaryEmotion?: string;

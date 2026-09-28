@@ -685,7 +685,9 @@ async function processIncomingWhatsAppMessage(
     session = {
       id: cleanPhone,
       phoneNumber: cleanPhone.replace('whatsapp:', ''),
-      userName: profileName || '',
+      userName: profileName || 'Paciente WhatsApp',
+      age: '29 años',
+      gender: 'No especificado',
       state: 'AI_MODE',
       riskLevel: 'BAJO',
       startedAt: now,

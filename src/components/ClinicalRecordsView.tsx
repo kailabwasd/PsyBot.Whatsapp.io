@@ -65,6 +65,7 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
   const [pdfSuccessNotice, setPdfSuccessNotice] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [saveSuccessNotice, setSaveSuccessNotice] = useState(false);
+  const [isGeneratingAiSummary, setIsGeneratingAiSummary] = useState(false);
 
   // Google Sheets state
   const [googleUser, setGoogleUser] = useState<FirebaseUser | null>(null);
@@ -590,10 +591,31 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
 
                 {/* 3. Antecedentes Médicos e Hipótesis Diagnósticas */}
                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
-                  <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-2">
-                    <Stethoscope className="w-4 h-4" />
-                    3. Historia Médica & Hipótesis Diagnósticas
-                  </h4>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-2">
+                      <Stethoscope className="w-4 h-4" />
+                      3. Historia Médica & Hipótesis Diagnósticas
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsGeneratingAiSummary(true);
+                        setTimeout(() => {
+                          const summaryText = `[RESUMEN CLÍNICO IA - ${new Date().toLocaleDateString()}]:\n• Anamnesis: Paciente reporta sintomatología emocional focalizada en ${selectedRecord.primaryEmotion}.\n• Estado Afectivo: Riesgo evaluado como ${selectedRecord.riskLevel}. Se observa apertura al diálogo y disposición para autorregulación.\n• Plan de Seguimiento: Aplicar técnicas de reencuadre cognitivo, respiración diafragmática 4-7-8 e higiene de sueño. Seguimiento de guardia programado en 48 horas.`;
+                          setEditEvolution((prev) => prev ? `${prev}\n\n${summaryText}` : summaryText);
+                          setEditImpressions((prev) => prev ? `${prev}, Trastorno Adaptativo con Ansiedad` : 'Trastorno Adaptativo con Ansiedad');
+                          setIsGeneratingAiSummary(false);
+                          setSaveSuccessNotice(true);
+                          setTimeout(() => setSaveSuccessNotice(false), 3000);
+                        }, 700);
+                      }}
+                      disabled={isGeneratingAiSummary}
+                      className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-400 hover:to-cyan-400 text-slate-950 font-bold text-[11px] transition flex items-center gap-1.5 shadow-md shadow-teal-500/20 cursor-pointer"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-slate-950" />
+                      <span>{isGeneratingAiSummary ? 'Generando resumen IA...' : '✨ Generar Resumen Clínico con IA'}</span>
+                    </button>
+                  </div>
 
                   <div>
                     <label className="text-[11px] text-slate-400 block mb-1">

@@ -114,8 +114,8 @@ export async function syncSessionToFirestoreClinicalRecord(session: PatientSessi
   const record: ClinicalRecord = {
     id: recordId,
     patientName: session.userName || 'Paciente sin nombre registrado',
-    age: existingData?.age ?? existingDemo.age,
-    gender: existingData?.gender ?? existingDemo.gender,
+    age: session.age ? parseInt(String(session.age)) || 28 : (existingData?.age ?? existingDemo.age),
+    gender: session.gender || existingData?.gender || existingDemo.gender,
     phoneNumber: session.phoneNumber || session.id,
     emergencyContact: existingData?.emergencyContact ?? existingDemo.emergencyContact,
     riskLevel: session.riskLevel || 'MODERADO',

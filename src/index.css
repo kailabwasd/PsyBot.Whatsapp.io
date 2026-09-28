@@ -38,6 +38,11 @@
   mask-image: linear-gradient(to right, black 0%, black calc(100% - 16px), rgba(0, 0, 0, 0.9) calc(100% - 10px), rgba(0, 0, 0, 0.35) 100%);
 }
 
+/* Global text weight 700 rule as requested */
+body, p, span, h1, h2, h3, h4, h5, h6, label, button, input, textarea, select {
+  font-weight: 700 !important;
+}
+
 /* Accessibility classes */
 html.contrast-high {
   filter: contrast(150%) brightness(105%);

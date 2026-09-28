@@ -356,10 +356,10 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-[#F0F4F8] text-slate-900 flex flex-col font-sans selection:bg-amber-200 selection:text-slate-900">
+    <div className="min-h-screen bg-[#F0F4F8] text-slate-900 font-bold flex flex-col font-sans selection:bg-amber-200 selection:text-slate-900">
       
       {/* 1. Top Banner Institucional: GOV.CO y Alcaldía Mayor de Bogotá D.C. */}
-      <div className="bg-[#0B2545] border-b border-slate-700 text-xs text-slate-200 py-2.5 px-4 sm:px-8 shadow-sm">
+      <div className="bg-[#0B2545] border-b border-slate-800 text-xs text-slate-200 py-2.5 px-4 sm:px-8 shadow-sm">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <a 
@@ -487,7 +487,7 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
           )}
 
           <div className="max-w-4xl space-y-4">
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-50 border border-blue-200 text-blue-900 text-xs font-semibold shadow-sm">
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-50 border border-blue-200 text-blue-900 text-xs font-bold shadow-sm">
               <HeartPulse className="w-4 h-4 text-[#C8102E]" />
               <span>Plataforma Distrital de Salud Mental, Triage Inteligente y Primeros Auxilios Psicológicos</span>
             </div>
@@ -496,7 +496,7 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
               Atención Emocional Inmediata con <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-700 via-emerald-700 to-amber-600">Triage IA</span> y Especialistas de Guardia en Vivo
             </h1>
 
-            <p className="text-sm sm:text-base text-slate-700 leading-relaxed max-w-3xl">
+            <p className="text-sm sm:text-base text-slate-700 font-bold leading-relaxed max-w-3xl">
               <strong>Psybot SubaTECH</strong> es la plataforma de contención, triaje clínico asistido por IA y derivación profesional en tiempo real para los habitantes de la localidad de Suba y Bogotá D.C.
             </p>
           </div>
@@ -511,7 +511,7 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
               <MessageSquare className="w-5 h-5" />
             </div>
             <h3 className="text-base font-bold text-[#0B2545]">1. Canal WhatsApp Directo 24/7</h3>
-            <p className="text-xs text-slate-600 leading-relaxed">
+            <p className="text-xs text-slate-700 font-bold leading-relaxed">
               El usuario escribe directamente por WhatsApp desde su celular, sin necesidad de descargar aplicaciones adicionales ni trámites burocráticos.
             </p>
           </div>
@@ -522,7 +522,7 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
               <Bot className="w-5 h-5" />
             </div>
             <h3 className="text-base font-bold text-[#0B2545]">2. Triage y Contención con IA</h3>
-            <p className="text-xs text-slate-600 leading-relaxed">
+            <p className="text-xs text-slate-700 font-bold leading-relaxed">
               El motor clínico evalúa en segundos el nivel de riesgo afectivo (Bajo, Moderado, Alto o Crisis) y activa protocolos de emergencia.
             </p>
           </div>
@@ -533,7 +533,7 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
               <ShieldCheck className="w-5 h-5" />
             </div>
             <h3 className="text-base font-bold text-[#0B2545]">3. Guardia Psicológica Humana</h3>
-            <p className="text-xs text-slate-600 leading-relaxed">
+            <p className="text-xs text-slate-700 font-bold leading-relaxed">
               Especialistas con registro sanitario toman el caso en el panel, responden en vivo, contienen al paciente y generan historias clínicas oficiales.
             </p>
           </div>
