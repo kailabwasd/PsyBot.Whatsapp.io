@@ -40,6 +40,7 @@ import type { PsychologistAuthUser } from '../types/index.ts';
 import { SubaTechLogo } from './SubaTechLogo.tsx';
 import { BogotaCrest } from './BogotaCrest.tsx';
 import { LegalTermsModal, LegalTabType } from './LegalTermsModal.tsx';
+import { AccessibilityModal } from './AccessibilityModal.tsx';
 
 declare global {
   interface Window {
@@ -76,6 +77,7 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [showGoogleSelector, setShowGoogleSelector] = useState(false);
   const [showGithubSelector, setShowGithubSelector] = useState(false);
+  const [showAccessibility, setShowAccessibility] = useState(false);
 
   // Sync auth modal visibility with URL route changes
   useEffect(() => {
@@ -354,10 +356,10 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-[#070D18] text-slate-100 flex flex-col font-sans selection:bg-[#00E5FF] selection:text-slate-950">
+    <div className="min-h-screen bg-[#F0F4F8] text-slate-900 flex flex-col font-sans selection:bg-amber-200 selection:text-slate-900">
       
       {/* 1. Top Banner Institucional: GOV.CO y Alcaldía Mayor de Bogotá D.C. */}
-      <div className="bg-[#0B2545] border-b border-slate-800 text-xs text-slate-300 py-2.5 px-4 sm:px-8 shadow-sm">
+      <div className="bg-[#0B2545] border-b border-slate-700 text-xs text-slate-200 py-2.5 px-4 sm:px-8 shadow-sm">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <a 
@@ -369,25 +371,25 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
               <span>GOV.CO</span>
               <span className="w-1.5 h-1.5 rounded-full bg-[#FFC800]"></span>
             </a>
-            <span className="text-slate-600">·</span>
-            <span className="text-slate-200 font-semibold text-[11px] sm:text-xs">
+            <span className="text-slate-400">·</span>
+            <span className="text-slate-100 font-semibold text-[11px] sm:text-xs">
               Alcaldía Mayor de Bogotá D.C. · Secretaría Distrital de Salud
             </span>
           </div>
 
-          <div className="flex items-center gap-4 text-[11px] text-slate-400">
+          <div className="flex items-center gap-4 text-[11px] text-slate-300">
             <a 
               href={GOOGLE_DRIVE_FOLDER_URL} 
               target="_blank" 
               rel="noreferrer"
-              className="text-cyan-300 hover:text-white flex items-center gap-1 underline font-semibold transition"
+              className="text-cyan-200 hover:text-white flex items-center gap-1 underline font-semibold transition"
             >
               <ExternalLink className="w-3 h-3" />
               <span>Google Drive del Proyecto</span>
             </a>
             <span className="hidden sm:inline">·</span>
-            <span className="text-emerald-400 font-medium flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-emerald-300 font-medium flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-emerald-400" />
               Guardia Psicológica Activa 24/7
             </span>
           </div>
@@ -399,7 +401,7 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
         
         {/* Header y Botones de Acción de Acceso */}
         <div className="space-y-6 pt-4">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-4 border-b border-slate-800/80">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-4 border-b border-slate-300">
             <div className="flex items-center gap-4">
               <SubaTechLogo size="lg" showTagline={true} />
             </div>
@@ -414,9 +416,9 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
                   setShowAuthModal(true);
                   if (onNavigate) onNavigate('login');
                 }}
-                className="px-5 py-2.5 rounded-xl font-bold text-xs bg-[#00E5FF] hover:bg-[#00D2F4] text-slate-950 shadow-lg shadow-cyan-500/20 flex items-center gap-2 transition active:scale-95 cursor-pointer"
+                className="px-5 py-2.5 rounded-xl font-bold text-xs bg-[#0B2545] hover:bg-[#003366] text-white shadow-md flex items-center gap-2 transition active:scale-95 cursor-pointer"
               >
-                <LogIn className="w-4 h-4" />
+                <LogIn className="w-4 h-4 text-[#FFC800]" />
                 <span>Iniciar Sesión</span>
               </button>
 
@@ -428,21 +430,46 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
                   setShowAuthModal(true);
                   if (onNavigate) onNavigate('registro');
                 }}
-                className="px-5 py-2.5 rounded-xl font-bold text-xs bg-slate-800 hover:bg-slate-750 text-white border border-slate-700 hover:border-emerald-500/50 flex items-center gap-2 transition active:scale-95 cursor-pointer"
+                className="px-5 py-2.5 rounded-xl font-bold text-xs bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 hover:border-slate-400 flex items-center gap-2 transition active:scale-95 cursor-pointer shadow-sm"
               >
-                <UserPlus className="w-4 h-4 text-emerald-400" />
+                <UserPlus className="w-4 h-4 text-emerald-600" />
                 <span>Crear Cuenta de Psicólogo(a)</span>
+              </button>
+
+              {/* Botón de Accesibilidad con Silla de Ruedas */}
+              <button
+                type="button"
+                onClick={() => setShowAccessibility(true)}
+                className="p-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 hover:border-cyan-500 text-slate-700 hover:text-slate-900 transition flex items-center gap-1.5 text-xs font-semibold cursor-pointer shadow-sm group"
+                title="Opciones de Accesibilidad e Inclusión"
+                aria-label="Ajustes de accesibilidad"
+              >
+                <svg 
+                  className="w-4 h-4 text-cyan-600 group-hover:scale-110 transition-transform" 
+                  viewBox="0 0 24 24" 
+                  fill="none" 
+                  stroke="currentColor" 
+                  strokeWidth="2.2" 
+                  strokeLinecap="round" 
+                  strokeLinejoin="round"
+                >
+                  <circle cx="12" cy="4.5" r="2.5"/>
+                  <path d="M10 9h4l2 5h-3"/>
+                  <path d="M7.5 13.5a5.5 5.5 0 1 0 7.2 4.7"/>
+                  <path d="m11 9-1.5 5.5"/>
+                </svg>
+                <span className="hidden sm:inline">Accesibilidad</span>
               </button>
             </div>
           </div>
 
           {/* Banner de ruta protegida si intentó ingresar a un sub-dominio protegido */}
           {protectedRouteAttempted && (
-            <div className="p-3.5 bg-amber-950/70 border border-amber-500/40 rounded-2xl text-xs text-amber-200 flex items-center justify-between gap-3 animate-in fade-in">
+            <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-2xl text-xs text-amber-900 flex items-center justify-between gap-3 animate-in fade-in shadow-sm">
               <div className="flex items-center gap-2.5">
-                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
                 <span>
-                  <strong>Sub-dominio Protegido:</strong> Para acceder a <strong className="text-white font-mono">/{protectedRouteAttempted}</strong> debes identificarte con tu cuenta de especialista.
+                  <strong>Sub-dominio Protegido:</strong> Para acceder a <strong className="text-slate-950 font-mono">/{protectedRouteAttempted}</strong> debes identificarte con tu cuenta de especialista.
                 </span>
               </div>
               <button
@@ -452,7 +479,7 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
                   setShowAuthModal(true);
                   if (onNavigate) onNavigate('login');
                 }}
-                className="px-3 py-1 bg-amber-500 text-slate-950 font-bold rounded-lg hover:bg-amber-400 transition text-[11px] shrink-0 cursor-pointer"
+                className="px-3 py-1 bg-amber-600 text-white font-bold rounded-lg hover:bg-amber-700 transition text-[11px] shrink-0 cursor-pointer"
               >
                 Ingresar Ahora
               </button>
@@ -460,16 +487,16 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
           )}
 
           <div className="max-w-4xl space-y-4">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyan-950/60 border border-cyan-500/40 text-cyan-300 text-xs font-semibold">
-              <HeartPulse className="w-4 h-4 text-[#FF3646]" />
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-50 border border-blue-200 text-blue-900 text-xs font-semibold shadow-sm">
+              <HeartPulse className="w-4 h-4 text-[#C8102E]" />
               <span>Plataforma Distrital de Salud Mental, Triage Inteligente y Primeros Auxilios Psicológicos</span>
             </div>
 
-            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black text-white tracking-tight leading-[1.15]">
-              Atención Emocional Inmediata con <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#00E5FF] via-emerald-400 to-[#FAFF00]">Triage IA</span> y Especialistas de Guardia en Vivo
+            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black text-[#0B2545] tracking-tight leading-[1.15]">
+              Atención Emocional Inmediata con <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-700 via-emerald-700 to-amber-600">Triage IA</span> y Especialistas de Guardia en Vivo
             </h1>
 
-            <p className="text-sm sm:text-base text-slate-300 leading-relaxed max-w-3xl">
+            <p className="text-sm sm:text-base text-slate-700 leading-relaxed max-w-3xl">
               <strong>Psybot SubaTECH</strong> es la plataforma de contención, triaje clínico asistido por IA y derivación profesional en tiempo real para los habitantes de la localidad de Suba y Bogotá D.C.
             </p>
           </div>
@@ -479,34 +506,34 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           
           {/* Pilar 1 */}
-          <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-3 hover:border-cyan-500/30 transition">
-            <div className="w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center border border-cyan-500/20">
+          <div className="p-5 rounded-2xl bg-white border border-slate-200 space-y-3 shadow-sm hover:shadow transition">
+            <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center border border-blue-100">
               <MessageSquare className="w-5 h-5" />
             </div>
-            <h3 className="text-base font-bold text-white">1. Canal WhatsApp Directo 24/7</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
+            <h3 className="text-base font-bold text-[#0B2545]">1. Canal WhatsApp Directo 24/7</h3>
+            <p className="text-xs text-slate-600 leading-relaxed">
               El usuario escribe directamente por WhatsApp desde su celular, sin necesidad de descargar aplicaciones adicionales ni trámites burocráticos.
             </p>
           </div>
 
           {/* Pilar 2 */}
-          <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-3 hover:border-purple-500/30 transition">
-            <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-400 flex items-center justify-center border border-purple-500/20">
+          <div className="p-5 rounded-2xl bg-white border border-slate-200 space-y-3 shadow-sm hover:shadow transition">
+            <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center border border-purple-100">
               <Bot className="w-5 h-5" />
             </div>
-            <h3 className="text-base font-bold text-white">2. Triage y Contención con IA</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
+            <h3 className="text-base font-bold text-[#0B2545]">2. Triage y Contención con IA</h3>
+            <p className="text-xs text-slate-600 leading-relaxed">
               El motor clínico evalúa en segundos el nivel de riesgo afectivo (Bajo, Moderado, Alto o Crisis) y activa protocolos de emergencia.
             </p>
           </div>
 
           {/* Pilar 3 */}
-          <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-3 hover:border-emerald-500/30 transition">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center border border-emerald-500/20">
+          <div className="p-5 rounded-2xl bg-white border border-slate-200 space-y-3 shadow-sm hover:shadow transition">
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center border border-emerald-100">
               <ShieldCheck className="w-5 h-5" />
             </div>
-            <h3 className="text-base font-bold text-white">3. Guardia Psicológica Humana</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
+            <h3 className="text-base font-bold text-[#0B2545]">3. Guardia Psicológica Humana</h3>
+            <p className="text-xs text-slate-600 leading-relaxed">
               Especialistas con registro sanitario toman el caso en el panel, responden en vivo, contienen al paciente y generan historias clínicas oficiales.
             </p>
           </div>
@@ -517,22 +544,22 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 pt-2">
           
           {/* Card 1: Recursos en Google Drive y Docs */}
-          <div className="p-5 rounded-2xl bg-gradient-to-r from-blue-950/70 via-slate-900 to-cyan-950/60 border border-blue-600/40 shadow-xl space-y-3 flex flex-col justify-between">
+          <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-3 flex flex-col justify-between">
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs font-bold text-blue-300">
-                  <BookOpen className="w-4 h-4 text-cyan-400" />
+                <div className="flex items-center gap-2 text-xs font-bold text-blue-800">
+                  <BookOpen className="w-4 h-4 text-blue-600" />
                   <span>DOCUMENTACIÓN Y RECURSOS DEL PROYECTO</span>
                 </div>
-                <span className="text-[10px] bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full border border-blue-500/30">
+                <span className="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full border border-blue-200 font-semibold">
                   Google Workspace
                 </span>
               </div>
 
-              <h4 className="text-sm sm:text-base font-bold text-white">
+              <h4 className="text-sm sm:text-base font-bold text-[#0B2545]">
                 Ficha Técnica e Investigación del Proyecto en Google Drive
               </h4>
-              <p className="text-xs text-slate-300 leading-relaxed">
+              <p className="text-xs text-slate-600 leading-relaxed">
                 Accede a la memoria descriptiva, protocolos de salud pública distrital, marco normativo Ley 1090 y arquitectura tecnológica.
               </p>
             </div>
@@ -541,9 +568,9 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
               <button
                 type="button"
                 onClick={() => setShowProjectModal(true)}
-                className="py-2 px-4 rounded-xl text-xs font-bold bg-[#00E5FF] hover:bg-[#00D2F4] text-slate-950 flex items-center gap-2 shadow-lg shadow-cyan-500/20 transition cursor-pointer"
+                className="py-2 px-4 rounded-xl text-xs font-bold bg-[#0B2545] hover:bg-[#003366] text-white flex items-center gap-2 shadow transition cursor-pointer"
               >
-                <FileText className="w-4 h-4" />
+                <FileText className="w-4 h-4 text-[#FFC800]" />
                 <span>Ver Ficha del Proyecto</span>
               </button>
 
@@ -551,41 +578,41 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
                 href={GOOGLE_DRIVE_FOLDER_URL}
                 target="_blank"
                 rel="noreferrer"
-                className="py-2 px-4 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 flex items-center gap-2 transition"
+                className="py-2 px-4 rounded-xl text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 flex items-center gap-2 transition shadow-sm"
               >
-                <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
                 <span>Carpeta Google Drive Oficial</span>
               </a>
             </div>
           </div>
 
           {/* Card 2: Canal Ciudadano WhatsApp */}
-          <div className="p-5 rounded-2xl bg-emerald-950/50 border border-emerald-500/30 space-y-3 flex flex-col justify-between">
+          <div className="p-5 rounded-2xl bg-white border border-emerald-200 shadow-sm space-y-3 flex flex-col justify-between">
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-emerald-400 flex items-center gap-2">
-                  <PhoneCall className="w-4 h-4" />
+                <span className="text-xs font-bold text-emerald-800 flex items-center gap-2">
+                  <PhoneCall className="w-4 h-4 text-emerald-600" />
                   CANAL CIUDADANO DIRECTO POR WHATSAPP
                 </span>
-                <span className="text-[10px] text-emerald-300 font-mono bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                <span className="text-[10px] text-emerald-800 font-mono bg-emerald-100 px-2 py-0.5 rounded border border-emerald-200 font-semibold">
                   Línea Gratuita
                 </span>
               </div>
 
-              <p className="text-xs text-slate-200 font-medium">
-                Número oficial de WhatsApp: <strong className="text-emerald-400 font-mono text-sm">+1 415 523 8886</strong>
+              <p className="text-xs text-slate-700 font-medium">
+                Número oficial de WhatsApp: <strong className="text-emerald-700 font-mono text-sm">+1 415 523 8886</strong>
               </p>
-              <p className="text-[11px] text-slate-400">
-                Escribe <code className="text-[#FAFF00] font-bold bg-slate-950 px-1.5 py-0.5 rounded border border-amber-500/30">join limited-burn</code> para iniciar de inmediato.
+              <p className="text-[11px] text-slate-600">
+                Escribe <code className="text-amber-800 font-bold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">join limited-burn</code> para iniciar de inmediato.
               </p>
             </div>
 
             <div className="flex items-center gap-2 pt-2">
               <button
                 onClick={copySandboxCode}
-                className="py-2 px-3 rounded-xl text-xs bg-slate-900 border border-slate-700 hover:border-emerald-500 text-slate-200 flex items-center gap-1.5 transition cursor-pointer"
+                className="py-2 px-3 rounded-xl text-xs bg-white border border-slate-300 hover:border-slate-400 text-slate-700 flex items-center gap-1.5 transition cursor-pointer shadow-sm"
               >
-                {copiedCode ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                {copiedCode ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
                 <span>{copiedCode ? '¡Copiado!' : 'Copiar join'}</span>
               </button>
 
@@ -593,7 +620,7 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
                 href="https://wa.me/14155238886?text=join%20limited-burn"
                 target="_blank"
                 rel="noreferrer"
-                className="py-2 px-4 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 flex items-center gap-1.5 shadow-md shadow-emerald-500/20 transition"
+                className="py-2 px-4 rounded-xl text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white flex items-center gap-1.5 shadow-sm transition"
               >
                 <span>Abrir Chat WhatsApp</span>
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -604,23 +631,23 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
         </div>
 
         {/* Footer legal & lineas de emergencia */}
-        <div className="pt-6 border-t border-slate-800 space-y-3 text-xs text-slate-400">
+        <div className="pt-6 border-t border-slate-300 space-y-3 text-xs text-slate-600">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <span>Líneas de Emergencia 24/7:</span>
-              <strong className="text-white">Línea 106</strong>
+              <strong className="text-slate-900 font-bold">Línea 106</strong>
               <span>·</span>
-              <strong className="text-white">Línea 123</strong>
+              <strong className="text-slate-900 font-bold">Línea 123</strong>
               <span>·</span>
-              <strong className="text-white">Línea Púrpura</strong>
+              <strong className="text-slate-900 font-bold">Línea Púrpura</strong>
             </div>
-            <div className="text-[11px] text-slate-500">
+            <div className="text-[11px] text-slate-500 font-medium">
               SubaTECH · Cocreando la Suba del Futuro
             </div>
           </div>
 
           {/* Legal Links bar */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-2 border-t border-slate-850 text-[11px] text-slate-400">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-2 border-t border-slate-200 text-[11px] text-slate-500">
             <button
               type="button"
               onClick={() => {
@@ -1197,6 +1224,12 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
           setShowLegalModal(false);
         }}
         showAcceptButton={true}
+      />
+
+      {/* Modal de Accesibilidad (Silla de Ruedas / Ajustes Inclusivos) */}
+      <AccessibilityModal
+        isOpen={showAccessibility}
+        onClose={() => setShowAccessibility(false)}
       />
 
     </div>

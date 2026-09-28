@@ -34,11 +34,13 @@ import { PsychologistLogin } from './components/PsychologistLogin.tsx';
 import { CreatePsychologistProfile } from './components/CreatePsychologistProfile.tsx';
 import { CookieConsentBanner } from './components/CookieConsentBanner.tsx';
 import { SettingsModal } from './components/SettingsModal.tsx';
+import { AccessibilityModal } from './components/AccessibilityModal.tsx';
 import { SubaTechLogo } from './components/SubaTechLogo.tsx';
 import { LegalTermsModal, LegalTabType } from './components/LegalTermsModal.tsx';
 import { NotificationToastContainer } from './components/NotificationToast.tsx';
 import { PsychologistsDirectoryView } from './components/PsychologistsDirectoryView.tsx';
 import { AppRoute, parseCurrentRoute, navigateTo, normalizeRoute } from './lib/router.ts';
+import { applyAccessibilitySettings, getStoredAccessibilitySettings } from './lib/accessibility.ts';
 import { 
   notifyPsychologist, 
   requestBrowserNotificationPermission, 
@@ -58,7 +60,7 @@ import {
 } from './lib/firebase.ts';
 import { onAuthStateChanged } from 'firebase/auth';
 
-type NavigationTab = 'QUEUE' | 'ACTIVE' | 'SUPERVISOR' | 'RECORDS' | 'PSYCHOLOGISTS' | 'LANDING';
+type NavigationTab = 'QUEUE' | 'ACTIVE' | 'SUPERVISOR' | 'RECORDS' | 'PSYCHOLOGISTS';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<PsychologistAuthUser | null>(() => getStoredPsychologist());
@@ -67,6 +69,7 @@ export default function App() {
   const [isCompletingProfile, setIsCompletingProfile] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isAccessibilityOpen, setIsAccessibilityOpen] = useState(false);
   const [showLegalModal, setShowLegalModal] = useState(false);
   const [legalTab, setLegalTab] = useState<LegalTabType>('PRIVACY');
   const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'subatech'>('subatech');
@@ -78,12 +81,10 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<NavigationTab>(() => {
     const route = parseCurrentRoute();
-    if (route === 'triage') return 'QUEUE';
+    if (route === 'psicologos') return 'PSYCHOLOGISTS';
     if (route === 'chat') return 'ACTIVE';
     if (route === 'expedientes') return 'RECORDS';
     if (route === 'supervisor') return 'SUPERVISOR';
-    if (route === 'psicologos') return 'PSYCHOLOGISTS';
-    if (route === 'inicio') return 'LANDING';
     return 'QUEUE';
   });
   const [sessions, setSessions] = useState<PatientSession[]>([]);
@@ -128,12 +129,40 @@ export default function App() {
     setToasts((prev) => [testNotif, ...prev.slice(0, 3)]);
   };
 
+  // Navigation scroll fade indicator states
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const checkNavScroll = () => {
+    if (navContainerRef.current) {
+      const { scrollLeft, scrollWidth, clientWidth } = navContainerRef.current;
+      setCanScrollLeft(scrollLeft > 6);
+      setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 6);
+    }
+  };
+
   const scrollNav = (direction: 'left' | 'right') => {
     if (navContainerRef.current) {
       const scrollAmount = direction === 'left' ? -220 : 220;
       navContainerRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+      setTimeout(checkNavScroll, 320);
     }
   };
+
+  // Re-check scroll on mount, resize, and whenever tabs change
+  useEffect(() => {
+    const timer = setTimeout(checkNavScroll, 120);
+    window.addEventListener('resize', checkNavScroll);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', checkNavScroll);
+    };
+  }, [allPsychologists.length, sessions.length, activeTab]);
+
+  // Apply stored accessibility settings on mount
+  useEffect(() => {
+    applyAccessibilitySettings(getStoredAccessibilitySettings());
+  }, []);
 
   // Listen to Firebase Auth state
   useEffect(() => {
@@ -228,22 +257,30 @@ export default function App() {
     const targetRoute = normalizeRoute(rawRoute);
     const isAuthed = Boolean(currentUser && currentUser.profileCompleted);
 
-    // If unauthenticated and tries to access protected sub-domains
-    if (!isAuthed && (targetRoute === 'triage' || targetRoute === 'chat' || targetRoute === 'expedientes' || targetRoute === 'supervisor' || targetRoute === 'auditoria')) {
+    // If unauthenticated and tries to access protected routes
+    if (!isAuthed) {
+      if (targetRoute === 'login' || targetRoute === 'registro' || targetRoute === 'inicio') {
+        setProtectedRouteAttempted(null);
+        setCurrentRoute(targetRoute);
+        navigateTo(targetRoute, replace);
+        return;
+      }
       setProtectedRouteAttempted(targetRoute);
       setCurrentRoute('login');
       navigateTo('login', replace);
       return;
     }
 
-    if (!isAuthed && targetRoute === 'psicologos') {
-      setProtectedRouteAttempted(null);
-      setCurrentRoute('psicologos');
-      navigateTo('psicologos', replace);
+    setProtectedRouteAttempted(null);
+
+    // If already authenticated and tries to visit login/inicio, keep them in clinical triage
+    if (targetRoute === 'inicio' || targetRoute === 'login' || targetRoute === 'registro') {
+      setCurrentRoute('triage');
+      setActiveTab('QUEUE');
+      navigateTo('triage', replace);
       return;
     }
 
-    setProtectedRouteAttempted(null);
     setCurrentRoute(targetRoute);
 
     if (targetRoute === 'triage') setActiveTab('QUEUE');
@@ -251,7 +288,6 @@ export default function App() {
     else if (targetRoute === 'expedientes') setActiveTab('RECORDS');
     else if (targetRoute === 'supervisor') setActiveTab('SUPERVISOR');
     else if (targetRoute === 'psicologos') setActiveTab('PSYCHOLOGISTS');
-    else if (targetRoute === 'inicio') setActiveTab('LANDING');
     else if (targetRoute === 'auditoria') {
       setIsSettingsOpen(true);
     }
@@ -270,9 +306,10 @@ export default function App() {
       else if (nextRoute === 'expedientes') setActiveTab('RECORDS');
       else if (nextRoute === 'supervisor') setActiveTab('SUPERVISOR');
       else if (nextRoute === 'psicologos') setActiveTab('PSYCHOLOGISTS');
-      else if (nextRoute === 'inicio') setActiveTab('LANDING');
       else if (nextRoute === 'auditoria') {
         setIsSettingsOpen(true);
+      } else if (currentUser && (nextRoute === 'inicio' || nextRoute === 'login' || nextRoute === 'registro')) {
+        setActiveTab('QUEUE');
       }
     };
 
@@ -285,7 +322,7 @@ export default function App() {
       window.removeEventListener('hashchange', onLocationChange);
       window.removeEventListener('applet:routechange', onLocationChange as any);
     };
-  }, []);
+  }, [currentUser]);
 
   // Parse deep-link URL on boot (e.g. ?tab=RECORDS&recordId=CR-525541908231)
   useEffect(() => {
@@ -549,43 +586,33 @@ export default function App() {
     );
   }
 
-  // 2. Unauthenticated Gate: Show Login, Register, Landing or Protected Psychologists Gate
+  // 2. Unauthenticated Gate: Show Login, Register, or Portal
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-        {currentRoute === 'psicologos' ? (
-          <main className="flex-1">
-            <PsychologistsDirectoryView
-              currentUser={null}
-              allPsychologists={allPsychologists}
-              onNavigate={handleNavigate}
-            />
-          </main>
-        ) : (
-          <PsychologistLogin
-            initialAuthMode={currentRoute === 'login' ? 'LOGIN' : currentRoute === 'registro' ? 'REGISTER' : 'NONE'}
-            onNavigate={handleNavigate}
-            protectedRouteAttempted={protectedRouteAttempted}
-            onLoginSuccess={(user) => {
-              setCurrentUser(user);
-              if (user.isAdmin || user.email === 'kailabwasd@gmail.com') {
-                setIsCompletingProfile(false);
-              } else {
-                setIsCompletingProfile(!user.profileCompleted || !user.license?.trim());
-              }
-              handleNavigate('triage');
-            }}
-            onNeedsProfileCompletion={(draft) => {
-              if (draft.isAdmin || draft.email === 'kailabwasd@gmail.com') {
-                setCurrentUser(draft);
-                setIsCompletingProfile(false);
-              } else {
-                setCurrentUser(draft);
-                setIsCompletingProfile(true);
-              }
-            }}
-          />
-        )}
+        <PsychologistLogin
+          initialAuthMode={currentRoute === 'login' ? 'LOGIN' : currentRoute === 'registro' ? 'REGISTER' : 'NONE'}
+          onNavigate={handleNavigate}
+          protectedRouteAttempted={protectedRouteAttempted}
+          onLoginSuccess={(user) => {
+            setCurrentUser(user);
+            if (user.isAdmin || user.email === 'kailabwasd@gmail.com') {
+              setIsCompletingProfile(false);
+            } else {
+              setIsCompletingProfile(!user.profileCompleted || !user.license?.trim());
+            }
+            handleNavigate('triage');
+          }}
+          onNeedsProfileCompletion={(draft) => {
+            if (draft.isAdmin || draft.email === 'kailabwasd@gmail.com') {
+              setCurrentUser(draft);
+              setIsCompletingProfile(false);
+            } else {
+              setCurrentUser(draft);
+              setIsCompletingProfile(true);
+            }
+          }}
+        />
         <CookieConsentBanner />
       </div>
     );
@@ -613,12 +640,12 @@ export default function App() {
   const getThemeClasses = () => {
     switch (themeMode) {
       case 'dark':
-        return 'min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-[#00E5FF] selection:text-slate-950';
+        return 'min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-cyan-200 selection:text-slate-900';
       case 'light':
-        return 'min-h-screen bg-white text-slate-900 flex flex-col font-sans selection:bg-[#FFC800] selection:text-slate-900';
+        return 'min-h-screen bg-[#FDF6F0] text-slate-900 flex flex-col font-sans selection:bg-amber-200 selection:text-slate-900';
       case 'subatech':
       default:
-        return 'min-h-screen bg-[#F4F6F9] text-slate-800 flex flex-col font-sans selection:bg-[#FFC800] selection:text-[#0B2545]';
+        return 'min-h-screen bg-[#F0F4F8] text-slate-800 flex flex-col font-sans selection:bg-amber-300/60 selection:text-[#0B2545]';
     }
   };
 
@@ -635,6 +662,7 @@ export default function App() {
           setAllPsychologists(list);
           setIsSettingsOpen(true);
         }}
+        onOpenAccessibility={() => setIsAccessibilityOpen(true)}
         waitingCount={waitingCount}
         crisisCount={crisisCount}
         activeCount={myActiveCount}
@@ -652,107 +680,139 @@ export default function App() {
           {/* Left scroll navigation arrow */}
           <button
             onClick={() => scrollNav('left')}
-            className="hidden sm:flex shrink-0 mr-2 p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition active:scale-95 z-10"
+            className={`hidden sm:flex shrink-0 mr-2 p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition active:scale-95 z-30 ${
+              !canScrollLeft ? 'opacity-40 cursor-default' : ''
+            }`}
             title="Desplazar hacia la izquierda"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
 
-          <nav 
-            ref={navContainerRef as any}
-            className="flex-1 flex space-x-1 sm:space-x-2 pt-2 overflow-x-auto nav-scrollbar text-xs sm:text-sm font-semibold scroll-smooth"
-          >
-            
-            {/* Directorio de Psicólogos */}
-            <button
-              onClick={() => handleNavigate('psicologos')}
-              className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
-                activeTab === 'PSYCHOLOGISTS'
-                  ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
-                  : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
+          {/* Navigation Scroll Container with Subtle, Neutral Edge Fade Indicators */}
+          <div className="relative flex-1 min-w-0 flex items-center overflow-hidden">
+            {/* Left Edge Subtle Fade Indicator */}
+            <div
+              className={`absolute left-0 top-0 bottom-0 w-3.5 pointer-events-none z-20 bg-gradient-to-r from-[#0B2545]/60 to-transparent transition-opacity duration-300 ${
+                canScrollLeft ? 'opacity-100' : 'opacity-0'
               }`}
-            >
-              <Users className="w-4 h-4 text-cyan-400" />
-              <span>Directorio de Psicólogos</span>
-              <span className="text-[11px] px-2 py-0.5 rounded-full font-bold font-mono bg-cyan-900/60 text-cyan-200 border border-cyan-500/30">
-                {allPsychologists.length || 1}
-              </span>
-            </button>
+              aria-hidden="true"
+            />
 
-            {/* Bandeja General */}
-            <button
-              onClick={() => handleNavigate('triage')}
-              className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
-                activeTab === 'QUEUE'
-                  ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
-                  : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
+            <nav 
+              ref={navContainerRef as any}
+              onScroll={checkNavScroll}
+              className={`flex-1 flex space-x-1 sm:space-x-2 pt-2 overflow-x-auto nav-scrollbar text-xs sm:text-sm font-semibold scroll-smooth ${
+                canScrollLeft && canScrollRight
+                  ? 'fade-both'
+                  : canScrollLeft
+                  ? 'fade-left'
+                  : canScrollRight
+                  ? 'fade-right'
+                  : ''
               }`}
             >
-              <Inbox className="w-4 h-4 text-[#C8102E]" />
-              <span>Guardia Triage Pacientes</span>
-              {waitingCount > 0 && (
-                <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold font-mono ${
-                  crisisCount > 0 ? 'bg-[#C8102E] text-white animate-pulse' : 'bg-[#FFC800] text-[#0B2545]'
-                }`}>
-                  {waitingCount}
+              
+              {/* Bandeja General */}
+              <button
+                onClick={() => handleNavigate('triage')}
+                className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
+                  activeTab === 'QUEUE'
+                    ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
+                    : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
+                }`}
+              >
+                <Inbox className="w-4 h-4 text-[#C8102E]" />
+                <span>Guardia Triage Pacientes</span>
+                {waitingCount > 0 && (
+                  <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold font-mono ${
+                    crisisCount > 0 ? 'bg-[#C8102E] text-white animate-pulse' : 'bg-[#FFC800] text-[#0B2545]'
+                  }`}>
+                    {waitingCount}
+                  </span>
+                )}
+              </button>
+
+              {/* Mis Casos Activos */}
+              <button
+                onClick={() => handleNavigate('chat')}
+                className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
+                  activeTab === 'ACTIVE'
+                    ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
+                    : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
+                }`}
+              >
+                <MessageSquare className="w-4 h-4 text-emerald-600" />
+                <span>Mis Pacientes en Atención</span>
+                {myActiveCount > 0 && (
+                  <span className="text-[11px] px-2 py-0.5 rounded-full font-bold font-mono bg-emerald-100 text-emerald-800">
+                    {myActiveCount}
+                  </span>
+                )}
+              </button>
+
+              {/* Directorio de Psicólogos */}
+              <button
+                onClick={() => handleNavigate('psicologos')}
+                className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
+                  activeTab === 'PSYCHOLOGISTS'
+                    ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
+                    : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
+                }`}
+              >
+                <Users className="w-4 h-4 text-cyan-400" />
+                <span>Directorio de Psicólogos</span>
+                <span className="text-[11px] px-2 py-0.5 rounded-full font-bold font-mono bg-cyan-900/60 text-cyan-200 border border-cyan-500/30">
+                  {allPsychologists.length || 1}
                 </span>
-              )}
-            </button>
+              </button>
 
-            {/* Mis Casos Activos */}
-            <button
-              onClick={() => handleNavigate('chat')}
-              className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
-                activeTab === 'ACTIVE'
-                  ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
-                  : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
-              }`}
-            >
-              <MessageSquare className="w-4 h-4 text-emerald-600" />
-              <span>Mis Pacientes en Atención</span>
-              {myActiveCount > 0 && (
-                <span className="text-[11px] px-2 py-0.5 rounded-full font-bold font-mono bg-emerald-100 text-emerald-800">
-                  {myActiveCount}
-                </span>
-              )}
-            </button>
+              {/* Historial Clínico Firebase */}
+              <button
+                onClick={() => handleNavigate('expedientes')}
+                className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
+                  activeTab === 'RECORDS'
+                    ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
+                    : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
+                }`}
+              >
+                <Database className="w-4 h-4 text-blue-400" />
+                <span>Historias Clínicas Digitales</span>
+              </button>
 
-            {/* Historial Clínico Firebase */}
-            <button
-              onClick={() => handleNavigate('expedientes')}
-              className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
-                activeTab === 'RECORDS'
-                  ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
-                  : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
-              }`}
-            >
-              <Database className="w-4 h-4 text-blue-400" />
-              <span>Historias Clínicas Digitales</span>
-            </button>
+              {/* Monitor IA */}
+              <button
+                onClick={() => handleNavigate('supervisor')}
+                className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
+                  activeTab === 'SUPERVISOR'
+                    ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
+                    : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
+                }`}
+              >
+                <Bot className="w-4 h-4 text-purple-400" />
+                <span>Supervisor Clínico IA</span>
+                {aiCount > 0 && (
+                  <span className="text-[11px] px-2 py-0.5 rounded-full font-mono bg-purple-100 text-purple-900">
+                    {aiCount}
+                  </span>
+                )}
+              </button>
+            </nav>
 
-            {/* Monitor IA */}
-            <button
-              onClick={() => handleNavigate('supervisor')}
-              className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
-                activeTab === 'SUPERVISOR'
-                  ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
-                  : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
+            {/* Right Edge Subtle Fade Indicator */}
+            <div
+              className={`absolute right-0 top-0 bottom-0 w-3.5 pointer-events-none z-20 bg-gradient-to-l from-[#0B2545]/60 to-transparent transition-opacity duration-300 ${
+                canScrollRight ? 'opacity-100' : 'opacity-0'
               }`}
-            >
-              <Bot className="w-4 h-4 text-purple-400" />
-              <span>Supervisor Clínico IA</span>
-              {aiCount > 0 && (
-                <span className="text-[11px] px-2 py-0.5 rounded-full font-mono bg-purple-100 text-purple-900">
-                  {aiCount}
-                </span>
-              )}
-            </button>
-          </nav>
+              aria-hidden="true"
+            />
+          </div>
 
           {/* Right scroll navigation arrow */}
           <button
             onClick={() => scrollNav('right')}
-            className="hidden sm:flex shrink-0 ml-2 p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition active:scale-95 z-10"
+            className={`hidden sm:flex shrink-0 ml-2 p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition active:scale-95 z-30 ${
+              !canScrollRight ? 'opacity-40 cursor-default' : ''
+            }`}
             title="Desplazar hacia la derecha"
           >
             <ChevronRight className="w-4 h-4" />
@@ -766,20 +826,6 @@ export default function App() {
       {/* 3. Main View Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
         
-        {/* TAB 0: Directorio de Psicólogos (Sub-dominio protegido) */}
-        {activeTab === 'PSYCHOLOGISTS' && (
-          <PsychologistsDirectoryView
-            currentUser={currentUser}
-            allPsychologists={allPsychologists}
-            onNavigate={handleNavigate}
-            onOpenSettings={async () => {
-              const list = await listPsychologistsFromFirestore();
-              setAllPsychologists(list);
-              setIsSettingsOpen(true);
-            }}
-          />
-        )}
-
         {/* TAB 1: Guardia / Cola General */}
         {activeTab === 'QUEUE' && (
           <GeneralQueue
@@ -812,7 +858,21 @@ export default function App() {
           />
         )}
 
-        {/* TAB 3: Historiales Clínicos (Firebase Firestore) */}
+        {/* TAB 3: Directorio de Psicólogos y Asignación de Roles/Permisos */}
+        {activeTab === 'PSYCHOLOGISTS' && (
+          <PsychologistsDirectoryView
+            currentUser={currentUser}
+            allPsychologists={allPsychologists}
+            onNavigate={handleNavigate}
+            onOpenSettings={async () => {
+              const list = await listPsychologistsFromFirestore();
+              setAllPsychologists(list);
+              setIsSettingsOpen(true);
+            }}
+          />
+        )}
+
+        {/* TAB 4: Historiales Clínicos (Firebase Firestore) */}
         {activeTab === 'RECORDS' && (
           <ClinicalRecordsView
             sessions={sessions}
@@ -822,7 +882,7 @@ export default function App() {
           />
         )}
 
-        {/* TAB 4: Supervisión IA (Gemini) */}
+        {/* TAB 5: Supervisión IA (Gemini) */}
         {activeTab === 'SUPERVISOR' && (
           <AiSupervisor
             sessions={sessions}
@@ -831,36 +891,6 @@ export default function App() {
             }}
             onPreview={(session) => setPreviewModalSession(session)}
           />
-        )}
-
-        {/* TAB 5: Vista de Inicio Institucional (Sub-dominio público /inicio) */}
-        {activeTab === 'LANDING' && (
-          <div className="space-y-6">
-            <div className="p-4 bg-cyan-950/50 border border-cyan-500/30 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-              <div className="flex items-center gap-2.5 text-cyan-200">
-                <Globe className="w-4 h-4 text-cyan-400 shrink-0" />
-                <span>
-                  Portal Institucional de Inicio de MindBridge SubaTECH. Sesión activa: <strong className="text-white">{currentUser?.displayName}</strong>.
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleNavigate('triage')}
-                  className="px-3.5 py-1.5 bg-[#00E5FF] hover:bg-[#00D2F4] text-slate-950 font-bold rounded-xl transition text-[11px] cursor-pointer shadow-sm"
-                >
-                  Ir a Guardia de Triage →
-                </button>
-              </div>
-            </div>
-
-            <PsychologistLogin
-              initialAuthMode="NONE"
-              onNavigate={handleNavigate}
-              onLoginSuccess={() => {}}
-              onNeedsProfileCompletion={() => {}}
-            />
-          </div>
         )}
 
       </main>
@@ -1155,6 +1185,12 @@ export default function App() {
         onClose={() => setShowLegalModal(false)}
         initialTab={legalTab}
         showAcceptButton={false}
+      />
+
+      {/* Accessibility & Inclusion Modal (Silla de Ruedas / Ajustes Adaptados) */}
+      <AccessibilityModal
+        isOpen={isAccessibilityOpen}
+        onClose={() => setIsAccessibilityOpen(false)}
       />
 
     </div>
