@@ -116,3 +116,15 @@ html.access-highlight-links button {
   height: 4px;
   background: linear-gradient(90deg, #FFC800 0%, #FFC800 50%, #C8102E 50%, #C8102E 100%);
 }
+
+/* Hide Google reCAPTCHA badge in bottom right corner */
+.grecaptcha-badge,
+[class*="grecaptcha"],
+iframe[src*="recaptcha"],
+div[style*="z-index: 2000000000"],
+div[style*="z-index: 2000000000"] * {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  display: none !important;
+  pointer-events: none !important;
+}
