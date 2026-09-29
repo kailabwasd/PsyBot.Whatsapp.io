@@ -109,3 +109,15 @@ export interface ClinicalRecord {
   lastUpdated: number;
   createdAt: number;
 }
+
+export interface SystemErrorLog {
+  id: string;
+  timestamp: number;
+  service: 'TWILIO' | 'GEMINI' | 'WEBHOOK' | 'FIRESTORE' | 'AUTH' | 'GENERAL';
+  title: string;
+  details: string;
+  errorCode?: number | string;
+  statusCode?: number;
+  targetPhone?: string;
+  suggestion?: string;
+}

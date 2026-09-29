@@ -430,6 +430,62 @@ async function syncTwilioInboundMessages(): Promise<{ newCount: number; processe
   return { newCount: processedList.length, processed: processedList };
 }
 
+// Interface and storage for System and Twilio API Error Logs
+export interface SystemErrorLog {
+  id: string;
+  timestamp: number;
+  service: 'TWILIO' | 'GEMINI' | 'WEBHOOK' | 'FIRESTORE' | 'AUTH' | 'GENERAL';
+  title: string;
+  details: string;
+  errorCode?: number | string;
+  statusCode?: number;
+  targetPhone?: string;
+  suggestion?: string;
+}
+
+const ERROR_LOGS_FILE = path.join(__dirname, 'data', 'error_logs.json');
+const systemErrorLogs: SystemErrorLog[] = [];
+
+function saveErrorLogsToFile() {
+  try {
+    const dir = path.dirname(ERROR_LOGS_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(ERROR_LOGS_FILE, JSON.stringify(systemErrorLogs.slice(0, 100), null, 2), 'utf-8');
+  } catch (e) {
+    console.error('Error saving error logs to file:', e);
+  }
+}
+
+function loadErrorLogsFromFile() {
+  try {
+    if (fs.existsSync(ERROR_LOGS_FILE)) {
+      const raw = fs.readFileSync(ERROR_LOGS_FILE, 'utf-8');
+      if (raw.trim()) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          systemErrorLogs.push(...parsed);
+          console.log(`[Error Logs] Loaded ${systemErrorLogs.length} error logs from storage`);
+        }
+      }
+    }
+  } catch (e) {}
+}
+loadErrorLogsFromFile();
+
+export function recordSystemError(entry: Omit<SystemErrorLog, 'id' | 'timestamp'>): SystemErrorLog {
+  const newLog: SystemErrorLog = {
+    id: `err-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    timestamp: Date.now(),
+    ...entry,
+  };
+  systemErrorLogs.unshift(newLog);
+  if (systemErrorLogs.length > 100) {
+    systemErrorLogs.pop();
+  }
+  saveErrorLogsToFile();
+  return newLog;
+}
+
 // Start continuous polling every 2.5 seconds
 setInterval(syncTwilioInboundMessages, 2500);
 
@@ -454,9 +510,17 @@ async function sendTwilioWhatsAppMessage(
   const { accountSid, authToken, whatsappNumber } = TWILIO_CONFIG;
   if (!accountSid || !authToken || !whatsappNumber) {
     console.warn('[Twilio] Missing Twilio credentials, skipping outbound WhatsApp API dispatch.');
+    const errorMsg = 'Credenciales de Twilio incompletas en el servidor. Configura TWILIO_ACCOUNT_SID y TWILIO_AUTH_TOKEN en Railway o en la Configuración de Administrador.';
+    recordSystemError({
+      service: 'TWILIO',
+      title: 'Credenciales de Twilio Incompletas',
+      details: errorMsg,
+      targetPhone: formattedTo,
+      suggestion: 'Configura las variables TWILIO_ACCOUNT_SID y TWILIO_AUTH_TOKEN en Railway o en la pestaña "Errores & Twilio" del panel de Administrador.',
+    });
     return { 
       success: false, 
-      error: 'Credenciales de Twilio incompletas en el servidor. Configura TWILIO_ACCOUNT_SID y TWILIO_AUTH_TOKEN en Railway.' 
+      error: errorMsg 
     };
   }
 
@@ -481,20 +545,41 @@ async function sendTwilioWhatsAppMessage(
       const errText = await response.text();
       let parsedMessage = errText;
       let errorCode: number | undefined;
+      let suggestion = 'Revisa las credenciales de Twilio y los registros de consola.';
+
       try {
         const parsed = JSON.parse(errText);
         errorCode = parsed.code;
-        if (parsed.code === 20003) {
-          parsedMessage = 'Twilio Error 20003 (401 Unauthorized): El TWILIO_AUTH_TOKEN configurado en Railway es inválido o expiró. Actualízalo en Railway.';
+        if (parsed.code === 20003 || response.status === 401) {
+          parsedMessage = 'Twilio Error 20003 (401 Unauthorized): El TWILIO_AUTH_TOKEN configurado en el servidor no coincide con tu consola Twilio o ha expirado.';
+          suggestion = 'Copia el Auth Token actual de tu consola de Twilio (https://console.twilio.com) y actualízalo en el panel de Administrador ("Errores & Twilio") o en las variables de entorno de Railway.';
         } else if (parsed.code === 21608) {
           parsedMessage = `Twilio Error 21608: El número ${formattedTo} aún no se ha unido a tu Sandbox de WhatsApp. Envía el comando "join <sandbox>" a ${whatsappNumber}.`;
+          suggestion = `Pídele al paciente que envíe el comando de activación del Sandbox de WhatsApp al número ${whatsappNumber}.`;
         } else if (parsed.code === 63016) {
-          parsedMessage = 'Twilio Error 63016: La ventana de 24 horas de WhatsApp cerró. El paciente debe enviar un mensaje nuevo antes de poder responderle.';
+          parsedMessage = 'Twilio Error 63016: La ventana de 24 horas de WhatsApp ha expirado. El paciente debe enviar un nuevo mensaje para reiniciar la sesión.';
+          suggestion = 'Espera a que el paciente escriba un nuevo mensaje o utiliza una plantilla de WhatsApp aprobada (Template Message).';
         } else {
           parsedMessage = parsed.message || errText;
+          suggestion = `Código de error Twilio ${parsed.code}. Revisa la documentación de Twilio en https://www.twilio.com/docs/errors/${parsed.code}`;
         }
       } catch {}
+
       console.error(`[Twilio Error ${response.status}] No se pudo enviar WhatsApp a ${formattedTo}:`, parsedMessage);
+
+      // Record in system error logs
+      recordSystemError({
+        service: 'TWILIO',
+        title: errorCode === 20003 || response.status === 401 
+          ? 'Twilio Error 20003: 401 Unauthorized (Auth Token Inválido)' 
+          : `Twilio Error ${errorCode || response.status}`,
+        details: parsedMessage,
+        errorCode: errorCode || response.status,
+        statusCode: response.status,
+        targetPhone: formattedTo,
+        suggestion,
+      });
+
       return { success: false, error: parsedMessage, errorCode };
     }
 
@@ -503,7 +588,15 @@ async function sendTwilioWhatsAppMessage(
     return { success: true, sid: data.sid };
   } catch (err: any) {
     console.error('[Twilio] Network/Server exception while dispatching WhatsApp message:', err);
-    return { success: false, error: err?.message || 'Error de conexión con Twilio API' };
+    const errorMsg = err?.message || 'Error de conexión con Twilio API';
+    recordSystemError({
+      service: 'TWILIO',
+      title: 'Error de Red / Conexión con Twilio',
+      details: errorMsg,
+      targetPhone: formattedTo,
+      suggestion: 'Verifica la conexión a internet del servidor o la disponibilidad de los servicios de Twilio.',
+    });
+    return { success: false, error: errorMsg };
   }
 }
 
@@ -1388,7 +1481,38 @@ app.get('/api/twilio/config', (_req, res) => {
     whatsappNumber: TWILIO_CONFIG.whatsappNumber,
     hasAuthToken: Boolean(TWILIO_CONFIG.authToken),
     webhookUrl: '/api/whatsapp',
+    errorLogsCount: systemErrorLogs.length,
   });
+});
+
+// GET System and Twilio Error Logs
+app.get('/api/admin/error-logs', (_req, res) => {
+  res.json({
+    success: true,
+    logs: systemErrorLogs,
+    count: systemErrorLogs.length,
+  });
+});
+
+// POST Clear System Error Logs
+app.post('/api/admin/error-logs/clear', (_req, res) => {
+  systemErrorLogs.length = 0;
+  saveErrorLogsToFile();
+  res.json({ success: true, message: 'Registro de errores del sistema vaciado exitosamente.' });
+});
+
+// POST Record manual test error log
+app.post('/api/admin/error-logs/record', (req, res) => {
+  const { title, details, service, errorCode, suggestion, targetPhone } = req.body;
+  const newLog = recordSystemError({
+    service: service || 'GENERAL',
+    title: title || 'Error Registrado Manualmente',
+    details: details || 'Detalle del error',
+    errorCode,
+    suggestion,
+    targetPhone,
+  });
+  res.json({ success: true, log: newLog });
 });
 
 app.post('/api/twilio/config', (req, res) => {

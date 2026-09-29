@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Settings, 
   User, 
@@ -35,11 +35,25 @@ import {
   Search,
   Phone,
   Users,
-  Clock
+  Clock,
+  Bug,
+  Server,
+  Zap,
+  Send,
+  Terminal,
+  HelpCircle,
+  Activity
 } from 'lucide-react';
-import type { PsychologistAuthUser, PsychologistPermissions, PatientSession } from '../types/index.ts';
+import type { PsychologistAuthUser, PsychologistPermissions, PatientSession, SystemErrorLog } from '../types/index.ts';
 import { savePsychologistProfile } from '../lib/firebase.ts';
 import { AuditLog, logAuditEvent } from './AuditLog.tsx';
+import { 
+  fetchSystemErrorLogs, 
+  clearSystemErrorLogs, 
+  fetchTwilioConfig, 
+  updateTwilioConfig, 
+  testTwilioConnection 
+} from '../services/api.ts';
 
 interface SettingsModalProps {
   currentUser: PsychologistAuthUser;
@@ -71,7 +85,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onDeleteSession,
   onClearAllSessions,
 }) => {
-  const [activeTab, setActiveTab] = useState<'profile' | 'twofactor' | 'admins' | 'patients' | 'theme' | 'audit'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'twofactor' | 'admins' | 'patients' | 'errorlogs' | 'theme' | 'audit'>('profile');
   
   // Profile editing local state
   const [displayName, setDisplayName] = useState(currentUser.displayName || '');
@@ -99,7 +113,135 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [deletingPatientId, setDeletingPatientId] = useState<string | null>(null);
   const [patientActionNotice, setPatientActionNotice] = useState<string | null>(null);
 
+  // System & Twilio Error Logs State
+  const [errorLogs, setErrorLogs] = useState<SystemErrorLog[]>([]);
+  const [isLoadingErrorLogs, setIsLoadingErrorLogs] = useState(false);
+  const [errorFilter, setErrorFilter] = useState<'ALL' | 'TWILIO' | 'GEMINI' | 'WEBHOOK' | 'AUTH'>('ALL');
+  const [errorSearchQuery, setErrorSearchQuery] = useState('');
+  const [selectedError, setSelectedError] = useState<SystemErrorLog | null>(null);
+  
+  // Twilio In-Memory Live Config State
+  const [twilioAccountSid, setTwilioAccountSid] = useState('');
+  const [twilioAuthToken, setTwilioAuthToken] = useState('');
+  const [twilioWhatsappNumber, setTwilioWhatsappNumber] = useState('');
+  const [hasTwilioAuthToken, setHasTwilioAuthToken] = useState(false);
+  const [isSavingTwilio, setIsSavingTwilio] = useState(false);
+  const [twilioSaveNotice, setTwilioSaveNotice] = useState<string | null>(null);
+  const [isTestingTwilio, setIsTestingTwilio] = useState(false);
+  const [testPhoneRecipient, setTestPhoneRecipient] = useState('');
+  const [twilioTestResult, setTwilioTestResult] = useState<{
+    success?: boolean;
+    message?: string;
+    error?: string;
+    errorCode?: number;
+    sid?: string;
+    suggestion?: string;
+  } | null>(null);
+
   const isOwner = currentUser.email === 'kailabwasd@gmail.com' || currentUser.isAdmin;
+
+  // Load error logs & Twilio config on mount and when tab changes to errorlogs
+  const loadErrorLogsAndTwilioConfig = async () => {
+    setIsLoadingErrorLogs(true);
+    try {
+      const [logs, config] = await Promise.all([
+        fetchSystemErrorLogs(),
+        fetchTwilioConfig().catch(() => null),
+      ]);
+      setErrorLogs(logs);
+      if (config) {
+        if (!twilioAccountSid) setTwilioAccountSid(config.accountSid || '');
+        if (!twilioWhatsappNumber) setTwilioWhatsappNumber(config.whatsappNumber || '');
+        setHasTwilioAuthToken(config.hasAuthToken || false);
+      }
+    } catch (e) {
+      console.warn('Error loading logs/twilio config:', e);
+    } finally {
+      setIsLoadingErrorLogs(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'errorlogs') {
+      loadErrorLogsAndTwilioConfig();
+    }
+  }, [activeTab]);
+
+  const handleSaveTwilioConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingTwilio(true);
+    setTwilioSaveNotice(null);
+    try {
+      const payload: { accountSid?: string; authToken?: string; whatsappNumber?: string } = {};
+      if (twilioAccountSid) payload.accountSid = twilioAccountSid.trim();
+      if (twilioAuthToken) payload.authToken = twilioAuthToken.trim();
+      if (twilioWhatsappNumber) payload.whatsappNumber = twilioWhatsappNumber.trim();
+
+      const res = await updateTwilioConfig(payload);
+      if (res.success) {
+        setHasTwilioAuthToken(res.hasAuthToken);
+        setTwilioSaveNotice('Credenciales de Twilio actualizadas y aplicadas en el servidor.');
+        await logAuditEvent({
+          adminEmail: currentUser.email || 'kailabwasd@gmail.com',
+          adminName: currentUser.displayName || 'Administrador',
+          action: 'SYSTEM_CONFIG',
+          severity: 'WARNING',
+          category: 'SISTEMA',
+          details: `Actualización manual de credenciales de Twilio (Account SID: ${res.accountSid}, WhatsApp: ${res.whatsappNumber}).`,
+        });
+        setTimeout(() => setTwilioSaveNotice(null), 4000);
+      }
+    } catch (err: any) {
+      console.error('Error saving twilio config:', err);
+      setTwilioSaveNotice(`Error al guardar: ${err.message || 'Fallo de red'}`);
+    } finally {
+      setIsSavingTwilio(false);
+    }
+  };
+
+  const handleTestTwilioSend = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!testPhoneRecipient) return;
+    setIsTestingTwilio(true);
+    setTwilioTestResult(null);
+    try {
+      const result = await testTwilioConnection({
+        toPhone: testPhoneRecipient,
+        accountSid: twilioAccountSid || undefined,
+        authToken: twilioAuthToken || undefined,
+        whatsappNumber: twilioWhatsappNumber || undefined,
+      });
+      setTwilioTestResult(result);
+      // Reload error logs to show the test event if any
+      const updatedLogs = await fetchSystemErrorLogs();
+      setErrorLogs(updatedLogs);
+    } catch (err: any) {
+      setTwilioTestResult({
+        success: false,
+        error: err.message || 'Error al ejecutar la prueba de Twilio.',
+      });
+    } finally {
+      setIsTestingTwilio(false);
+    }
+  };
+
+  const handleClearErrorLogs = async () => {
+    try {
+      await clearSystemErrorLogs();
+      setErrorLogs([]);
+      setSelectedError(null);
+      await logAuditEvent({
+        adminEmail: currentUser.email || 'kailabwasd@gmail.com',
+        adminName: currentUser.displayName || 'Administrador',
+        action: 'SYSTEM_CONFIG',
+        severity: 'INFO',
+        category: 'SISTEMA',
+        details: 'Vaciado manual del registro de errores del sistema y Twilio.',
+      });
+    } catch (err) {
+      console.error('Error clearing error logs:', err);
+    }
+  };
 
   // Roles y Permisos State Management
   const [psychDrafts, setPsychDrafts] = useState<Record<string, {
@@ -455,6 +597,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-950/80 text-red-300 border border-red-500/40 font-mono">
                 {sessions.length}
               </span>
+            </button>
+          )}
+
+          {isOwner && (
+            <button
+              onClick={() => setActiveTab('errorlogs')}
+              className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition cursor-pointer whitespace-nowrap ${activeTab === 'errorlogs' ? 'border-amber-400 text-amber-300' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+            >
+              <Bug className="w-4 h-4 text-amber-400" />
+              <span>Logs de Errores & Twilio</span>
+              {errorLogs.length > 0 && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-950/80 text-amber-300 border border-amber-500/40 font-mono">
+                  {errorLogs.length}
+                </span>
+              )}
             </button>
           )}
 
@@ -1333,6 +1490,327 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* TAB: ERROR LOGS & TWILIO DIAGNOSTICS */}
+          {activeTab === 'errorlogs' && (
+            <div className="space-y-6">
+              
+              {/* Error 20003 Direct Action / Troubleshooting Banner */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-950/60 via-slate-900 to-red-950/50 border border-amber-500/40 space-y-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center justify-center shrink-0 mt-0.5">
+                    <ShieldAlert className="w-5 h-5" />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-bold text-white">
+                        Diagnóstico de Twilio: Error 20003 (401 Unauthorized)
+                      </h4>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-950 text-red-300 border border-red-500/40 font-mono font-bold">
+                        HTTP 401
+                      </span>
+                    </div>
+                    <p className="text-xs text-amber-200/90 leading-relaxed">
+                      El error <strong className="text-white font-mono">20003 (Authenticate / Unauthorized)</strong> se produce cuando el <code className="bg-slate-950 px-1.5 py-0.5 rounded text-amber-300 font-mono">TWILIO_AUTH_TOKEN</code> configurado no coincide con el token de tu consola de Twilio o fue regenerado.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950/80 p-3.5 rounded-xl border border-amber-500/30 text-xs text-slate-300 space-y-2">
+                  <h5 className="font-bold text-amber-300 flex items-center gap-1.5">
+                    <KeyRound className="w-3.5 h-3.5" /> Pasos para solucionar el Error 20003:
+                  </h5>
+                  <ol className="list-decimal list-inside space-y-1 text-[11px] text-slate-300 leading-relaxed pl-1">
+                    <li>Ingresa a tu consola de Twilio en <a href="https://console.twilio.com" target="_blank" rel="noreferrer" className="text-cyan-300 hover:underline font-semibold inline-flex items-center gap-1">console.twilio.com <ExternalLink className="w-3 h-3" /></a>.</li>
+                    <li>En la pantalla de inicio (<strong>Account Info</strong>), copia tu <strong>Account SID</strong> y haz clic en <strong>Show</strong> para copiar tu <strong>Auth Token</strong>.</li>
+                    <li>Pégalos en el formulario a continuación y presiona <strong className="text-emerald-400">"Guardar Credenciales en Memoria"</strong> para probarlo inmediatamente, o actualiza la variable de entorno <code className="text-amber-300 font-mono">TWILIO_AUTH_TOKEN</code> en Railway.</li>
+                  </ol>
+                </div>
+              </div>
+
+              {/* Twilio In-Memory Live Config Form */}
+              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                    <Server className="w-4 h-4 text-cyan-400" /> Configuración de Credenciales Twilio WhatsApp
+                  </h4>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono flex items-center gap-1 font-bold ${
+                    hasTwilioAuthToken ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/40' : 'bg-red-950 text-red-300 border border-red-500/40'
+                  }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${hasTwilioAuthToken ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                    {hasTwilioAuthToken ? 'Token Cargado' : 'Sin Token'}
+                  </span>
+                </div>
+
+                {twilioSaveNotice && (
+                  <div className="p-3 bg-emerald-950/70 border border-emerald-500/50 rounded-xl text-emerald-200 text-xs flex items-center gap-2 animate-in fade-in">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>{twilioSaveNotice}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleSaveTwilioConfig} className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 mb-1">
+                      TWILIO_ACCOUNT_SID
+                    </label>
+                    <input
+                      type="text"
+                      value={twilioAccountSid}
+                      onChange={(e) => setTwilioAccountSid(e.target.value)}
+                      placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                      className="w-full bg-slate-900 border border-slate-750 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-white outline-none font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 mb-1">
+                      TWILIO_AUTH_TOKEN
+                    </label>
+                    <input
+                      type="password"
+                      value={twilioAuthToken}
+                      onChange={(e) => setTwilioAuthToken(e.target.value)}
+                      placeholder={hasTwilioAuthToken ? '••••••••••••••••••••••••••••••••' : 'Ingresa tu Auth Token de Twilio'}
+                      className="w-full bg-slate-900 border border-slate-750 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-white outline-none font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 mb-1">
+                      TWILIO_WHATSAPP_NUMBER
+                    </label>
+                    <input
+                      type="text"
+                      value={twilioWhatsappNumber}
+                      onChange={(e) => setTwilioWhatsappNumber(e.target.value)}
+                      placeholder="whatsapp:+14155238886"
+                      className="w-full bg-slate-900 border border-slate-750 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-white outline-none font-mono"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-3 flex justify-end pt-1">
+                    <button
+                      type="submit"
+                      disabled={isSavingTwilio}
+                      className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow disabled:opacity-50"
+                    >
+                      {isSavingTwilio ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                      <span>Guardar Credenciales en Servidor</span>
+                    </button>
+                  </div>
+                </form>
+
+                {/* Live Twilio Test Dispatcher */}
+                <div className="pt-3 border-t border-slate-800/80 space-y-3">
+                  <h5 className="text-xs font-bold text-slate-300 flex items-center gap-2">
+                    <Send className="w-3.5 h-3.5 text-teal-400" /> Probar Conexión y Envío de WhatsApp en Vivo
+                  </h5>
+                  
+                  <form onSubmit={handleTestTwilioSend} className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="text"
+                      value={testPhoneRecipient}
+                      onChange={(e) => setTestPhoneRecipient(e.target.value)}
+                      placeholder="Número destino con código de país (ej. +573107956907)"
+                      className="flex-1 bg-slate-900 border border-slate-750 focus:border-teal-400 rounded-xl px-3 py-2 text-xs text-white outline-none font-mono"
+                    />
+                    <button
+                      type="submit"
+                      disabled={isTestingTwilio || !testPhoneRecipient.trim()}
+                      className="px-4 py-2 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow disabled:opacity-50"
+                    >
+                      {isTestingTwilio ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+                      <span>Enviar Mensaje de Prueba</span>
+                    </button>
+                  </form>
+
+                  {twilioTestResult && (
+                    <div className={`p-3.5 rounded-xl border text-xs space-y-1.5 animate-in fade-in ${
+                      twilioTestResult.success 
+                        ? 'bg-emerald-950/70 border-emerald-500/50 text-emerald-200' 
+                        : 'bg-red-950/80 border-red-500/50 text-red-200'
+                    }`}>
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold flex items-center gap-1.5">
+                          {twilioTestResult.success ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          ) : (
+                            <AlertTriangle className="w-4 h-4 text-red-400" />
+                          )}
+                          {twilioTestResult.success ? 'Conexión Exitosa con Twilio' : 'Fallo de Autenticación / Despacho'}
+                        </span>
+                        {twilioTestResult.sid && (
+                          <span className="font-mono text-[10px] text-emerald-300">
+                            SID: {twilioTestResult.sid}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] leading-relaxed opacity-90">
+                        {twilioTestResult.message || twilioTestResult.error}
+                      </p>
+                      {twilioTestResult.suggestion && (
+                        <p className="text-[11px] font-semibold text-amber-300 pt-1 border-t border-red-800/40">
+                          💡 Solución: {twilioTestResult.suggestion}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Real-time System Error Logs Feed */}
+              <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <Terminal className="w-4 h-4 text-amber-400" /> Registro de Errores de Conexión y APIs ({errorLogs.length})
+                    </h4>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={loadErrorLogsAndTwilioConfig}
+                      disabled={isLoadingErrorLogs}
+                      className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-medium flex items-center gap-1 border border-slate-800 cursor-pointer"
+                      title="Actualizar registro de errores"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 text-cyan-400 ${isLoadingErrorLogs ? 'animate-spin' : ''}`} />
+                      <span>Actualizar</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleClearErrorLogs}
+                      disabled={errorLogs.length === 0}
+                      className="px-2.5 py-1.5 rounded-lg bg-red-950/40 hover:bg-red-950/70 text-red-300 text-xs font-medium flex items-center gap-1 border border-red-500/30 cursor-pointer disabled:opacity-40"
+                      title="Vaciar todos los errores"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                      <span>Vaciar Logs</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Filters and Search */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0">
+                    {(['ALL', 'TWILIO', 'WEBHOOK', 'GEMINI', 'AUTH'] as const).map((svc) => (
+                      <button
+                        key={svc}
+                        type="button"
+                        onClick={() => setErrorFilter(svc)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer shrink-0 ${
+                          errorFilter === svc 
+                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' 
+                            : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                        }`}
+                      >
+                        {svc === 'ALL' ? 'Todos los Servicios' : svc}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="relative flex-1 sm:max-w-xs">
+                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-500" />
+                    <input
+                      type="text"
+                      placeholder="Filtrar por código o texto..."
+                      value={errorSearchQuery}
+                      onChange={(e) => setErrorSearchQuery(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-750 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+                </div>
+
+                {/* Log List View */}
+                {errorLogs.length === 0 ? (
+                  <div className="p-8 bg-slate-950 rounded-2xl border border-slate-800 text-center space-y-2">
+                    <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto opacity-80" />
+                    <h5 className="text-xs font-bold text-white">Sin Errores Registrados</h5>
+                    <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
+                      El servidor no ha reportado fallos de autenticación de Twilio ni excepciones de API en las sesiones recientes.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-800/80 border border-slate-800 rounded-2xl bg-slate-950 overflow-hidden max-h-80 overflow-y-auto">
+                    {errorLogs
+                      .filter((log) => {
+                        if (errorFilter !== 'ALL' && log.service !== errorFilter) return false;
+                        if (!errorSearchQuery.trim()) return true;
+                        const q = errorSearchQuery.toLowerCase();
+                        return (
+                          log.title.toLowerCase().includes(q) ||
+                          log.details.toLowerCase().includes(q) ||
+                          String(log.errorCode || '').toLowerCase().includes(q) ||
+                          (log.targetPhone || '').toLowerCase().includes(q)
+                        );
+                      })
+                      .map((log) => {
+                        const isTwilio401 = log.errorCode === 20003 || log.statusCode === 401;
+                        return (
+                          <div
+                            key={log.id}
+                            className="p-3.5 space-y-2 hover:bg-slate-900/60 transition cursor-pointer"
+                            onClick={() => setSelectedError(selectedError?.id === log.id ? null : log)}
+                          >
+                            <div className="flex items-start justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold ${
+                                  log.service === 'TWILIO' 
+                                    ? 'bg-red-500/20 text-red-300 border border-red-500/30' 
+                                    : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+                                }`}>
+                                  {log.service}
+                                </span>
+
+                                {log.errorCode && (
+                                  <span className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold ${
+                                    isTwilio401 
+                                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' 
+                                      : 'bg-slate-800 text-slate-300'
+                                  }`}>
+                                    Error {log.errorCode}
+                                  </span>
+                                )}
+
+                                <span className="text-xs font-bold text-white">
+                                  {log.title}
+                                </span>
+                              </div>
+
+                              <span className="text-[10px] text-slate-500 flex items-center gap-1 font-mono">
+                                <Clock className="w-3 h-3" />
+                                {new Date(log.timestamp).toLocaleTimeString()} • {new Date(log.timestamp).toLocaleDateString()}
+                              </span>
+                            </div>
+
+                            <p className="text-[11px] text-slate-300 leading-relaxed font-mono bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
+                              {log.details}
+                            </p>
+
+                            {log.targetPhone && (
+                              <div className="text-[10px] text-slate-400 flex items-center gap-1 font-mono">
+                                <Phone className="w-3 h-3 text-slate-500" />
+                                <span>Destino: {log.targetPhone}</span>
+                              </div>
+                            )}
+
+                            {log.suggestion && (
+                              <div className="p-2 rounded-lg bg-amber-950/40 border border-amber-500/30 text-[11px] text-amber-200">
+                                💡 <strong className="text-amber-300">Sugerencia:</strong> {log.suggestion}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
+
             </div>
           )}
 
