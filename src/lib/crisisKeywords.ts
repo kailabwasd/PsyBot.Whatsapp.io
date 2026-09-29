@@ -11,7 +11,7 @@ export interface CrisisKeywordEntry {
   keywords: string[];
 }
 
-export const CRISIS_KEYWORDS_DATABASE: CrisisKeywordEntry[] = [
+export const INITIAL_CRISIS_KEYWORDS_DATABASE: CrisisKeywordEntry[] = [
   {
     category: 'SUICIDIO',
     displayName: 'Ideación y Riesgo Suicida',
@@ -178,6 +178,41 @@ export const CRISIS_KEYWORDS_DATABASE: CrisisKeywordEntry[] = [
   },
 ];
 
+export const CRISIS_KEYWORDS_DATABASE = INITIAL_CRISIS_KEYWORDS_DATABASE;
+
+let cachedDb: CrisisKeywordEntry[] | null = null;
+
+export function getStoredCrisisKeywords(): CrisisKeywordEntry[] {
+  if (cachedDb) return cachedDb;
+  try {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('psybot_crisis_keywords_db');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          cachedDb = parsed;
+          return parsed;
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Error reading stored crisis keywords:', e);
+  }
+  cachedDb = INITIAL_CRISIS_KEYWORDS_DATABASE;
+  return INITIAL_CRISIS_KEYWORDS_DATABASE;
+}
+
+export function saveStoredCrisisKeywords(db: CrisisKeywordEntry[]) {
+  cachedDb = db;
+  try {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('psybot_crisis_keywords_db', JSON.stringify(db));
+    }
+  } catch (e) {
+    console.error('Error saving stored crisis keywords:', e);
+  }
+}
+
 /**
  * Normaliza el texto removiendo tildes, signos diacríticos y caracteres de puntuación
  */
@@ -200,18 +235,18 @@ export interface CrisisMatchResult {
 }
 
 /**
- * Evalúa si el texto del paciente coincide con alguna de las palabras clave de crisis
+ * Evalúa si el texto del paciente coincide con alguna de las palabras clave de crisis actuales
  */
 export function matchCrisisKeyword(text: string): CrisisMatchResult {
   if (!text || typeof text !== 'string') return { matched: false };
   const normalized = normalizeClinicalText(text);
+  const db = getStoredCrisisKeywords();
 
-  for (const entry of CRISIS_KEYWORDS_DATABASE) {
+  for (const entry of db) {
     for (const kw of entry.keywords) {
       const normalizedKw = normalizeClinicalText(kw);
       if (!normalizedKw) continue;
 
-      // Coincidencia exacta de frase o límites de palabra
       if (normalized.includes(normalizedKw)) {
         return {
           matched: true,

@@ -60,6 +60,7 @@ import {
   triggerAdminTestReport,
   AdminNotificationSettings
 } from '../services/api.ts';
+import { getStoredCrisisKeywords, saveStoredCrisisKeywords, CrisisKeywordEntry } from '../lib/crisisKeywords.ts';
 
 interface SettingsModalProps {
   currentUser: PsychologistAuthUser;
@@ -91,7 +92,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onDeleteSession,
   onClearAllSessions,
 }) => {
-  const [activeTab, setActiveTab] = useState<'profile' | 'twofactor' | 'admins' | 'patients' | 'errorlogs' | 'theme' | 'audit'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'twofactor' | 'admins' | 'patients' | 'errorlogs' | 'theme' | 'audit' | 'crisiskeywords'>('profile');
   
   // Profile editing local state
   const [displayName, setDisplayName] = useState(currentUser.displayName || '');
@@ -155,6 +156,53 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     errorCode?: number;
     advice?: string;
   } | null>(null);
+
+  // Crisis Keywords Management State
+  const [crisisKeywordsDb, setCrisisKeywordsDb] = useState<CrisisKeywordEntry[]>(getStoredCrisisKeywords());
+  const [newKeywordCategory, setNewKeywordCategory] = useState<'SUICIDIO' | 'CRIMEN_VIOLENCIA' | 'AUTOLESION' | 'AMENAZA_INMINENTE'>('SUICIDIO');
+  const [newKeywordTerm, setNewKeywordTerm] = useState('');
+  const [crisisNotice, setCrisisNotice] = useState<string | null>(null);
+
+  const handleAddCrisisKeyword = (e: React.FormEvent) => {
+    e.preventDefault();
+    const term = newKeywordTerm.trim();
+    if (!term) return;
+
+    const updated = crisisKeywordsDb.map(entry => {
+      if (entry.category === newKeywordCategory) {
+        if (!entry.keywords.includes(term.toLowerCase())) {
+          return {
+            ...entry,
+            keywords: [...entry.keywords, term.toLowerCase()]
+          };
+        }
+      }
+      return entry;
+    });
+
+    saveStoredCrisisKeywords(updated);
+    setCrisisKeywordsDb([...updated]);
+    setNewKeywordTerm('');
+    setCrisisNotice(`Término "${term}" agregado exitosamente a la categoría ${newKeywordCategory}.`);
+    setTimeout(() => setCrisisNotice(null), 3500);
+  };
+
+  const handleDeleteCrisisKeyword = (category: string, keywordToDelete: string) => {
+    const updated = crisisKeywordsDb.map(entry => {
+      if (entry.category === category) {
+        return {
+          ...entry,
+          keywords: entry.keywords.filter(k => k !== keywordToDelete)
+        };
+      }
+      return entry;
+    });
+
+    saveStoredCrisisKeywords(updated);
+    setCrisisKeywordsDb([...updated]);
+    setCrisisNotice(`Término "${keywordToDelete}" eliminado de la base de datos de crisis.`);
+    setTimeout(() => setCrisisNotice(null), 3500);
+  };
 
   // Admin WhatsApp Automated Updates & Error Alerts State
   const [adminNotifyPhone, setAdminNotifyPhone] = useState('+573107956907');
@@ -716,6 +764,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   {errorLogs.length}
                 </span>
               )}
+            </button>
+          )}
+
+          {isOwner && (
+            <button
+              onClick={() => setActiveTab('crisiskeywords')}
+              className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition cursor-pointer whitespace-nowrap ${activeTab === 'crisiskeywords' ? 'border-red-500 text-red-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+            >
+              <ShieldAlert className="w-4 h-4 text-red-400" />
+              <span>Palabras Clave de Crisis</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-950 text-red-300 border border-red-500/40 font-mono font-bold">
+                {crisisKeywordsDb.reduce((acc, c) => acc + c.keywords.length, 0)}
+              </span>
             </button>
           )}
 
@@ -2103,6 +2164,105 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 )}
               </div>
 
+            </div>
+          )}
+
+          {/* TAB: CRISIS KEYWORDS */}
+          {activeTab === 'crisiskeywords' && isOwner && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-white">Gestión de Palabras Clave de Crisis</h3>
+                  <p className="text-xs text-slate-400">Administra los términos que disparan automáticamente la Alerta Roja de Triage y la notificación WhatsApp a +573107956907.</p>
+                </div>
+                <span className="text-[10px] px-2.5 py-1 rounded-full font-mono bg-red-950 text-red-300 border border-red-500/40 font-bold">
+                  {crisisKeywordsDb.reduce((acc, c) => acc + c.keywords.length, 0)} Términos Totales
+                </span>
+              </div>
+
+              {crisisNotice && (
+                <div className="p-3 bg-emerald-950/80 border border-emerald-500/40 rounded-xl text-emerald-200 text-xs flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>{crisisNotice}</span>
+                </div>
+              )}
+
+              {/* Add New Keyword Form */}
+              <form onSubmit={handleAddCrisisKeyword} className="p-4 rounded-2xl bg-slate-950 border border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 mb-1">Categoría de Riesgo</label>
+                  <select
+                    value={newKeywordCategory}
+                    onChange={(e: any) => setNewKeywordCategory(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-750 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                  >
+                    {crisisKeywordsDb.map(c => (
+                      <option key={c.category} value={c.category}>{c.displayName} ({c.category})</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 mb-1">Nueva Palabra o Frase Clave</label>
+                  <input
+                    type="text"
+                    value={newKeywordTerm}
+                    onChange={(e) => setNewKeywordTerm(e.target.value)}
+                    placeholder="Ej. sobredosis, matarme, etc."
+                    className="w-full bg-slate-900 border border-slate-750 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-white outline-none font-mono"
+                  />
+                </div>
+
+                <div>
+                  <button
+                    type="submit"
+                    className="w-full py-2 bg-[#00E5FF] hover:bg-[#00D2F4] text-slate-950 font-bold text-xs rounded-xl shadow transition cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Agregar Término</span>
+                  </button>
+                </div>
+              </form>
+
+              {/* Keywords Table view by category */}
+              <div className="space-y-4 max-h-[420px] overflow-y-auto pr-1">
+                {crisisKeywordsDb.map(entry => (
+                  <div key={entry.category} className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2.5 h-2.5 rounded-full ${entry.severity === 'CRITICA' ? 'bg-red-500 animate-pulse' : 'bg-amber-400'}`} />
+                        <h4 className="text-xs font-bold text-white">{entry.displayName}</h4>
+                        <span className="text-[10px] px-2 py-0.5 rounded font-mono bg-slate-800 text-slate-300">
+                          {entry.category}
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-slate-400 font-mono">
+                        {entry.keywords.length} términos
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-slate-400 italic">
+                      💡 Consejo clínico: {entry.clinicalAdvice}
+                    </p>
+
+                    <div className="flex flex-wrap gap-1.5 pt-2">
+                      {entry.keywords.map(kw => (
+                        <span key={kw} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-750 text-slate-200 text-xs font-mono">
+                          <span>{kw}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCrisisKeyword(entry.category, kw)}
+                            className="text-slate-500 hover:text-red-400 transition cursor-pointer"
+                            title={`Eliminar "${kw}"`}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

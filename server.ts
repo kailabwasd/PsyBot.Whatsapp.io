@@ -549,6 +549,8 @@ async function sendTwilioWhatsAppMessage(
     params.append('From', senderFrom);
     params.append('To', formattedTo);
     params.append('Body', messageBody);
+    const statusCallbackUrl = process.env.TWILIO_STATUS_CALLBACK_URL || `https://psybot-whatsapp-production.up.railway.app/api/twilio/status-callback`;
+    params.append('StatusCallback', statusCallbackUrl);
 
     const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
     const response = await fetch(twilioUrl, {
@@ -1451,7 +1453,9 @@ const STATUS_CALLBACK_PATHS = [
   '/api/twilio/status-callback',
   '/api/whatsapp/status-callback',
   '/twilio/status-callback',
-  '/whatsapp/status-callback'
+  '/whatsapp/status-callback',
+  '/webhook/status',
+  '/status'
 ];
 STATUS_CALLBACK_PATHS.forEach(p => {
   app.post(p, handleTwilioStatusCallback);

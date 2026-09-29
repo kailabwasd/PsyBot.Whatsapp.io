@@ -382,57 +382,57 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
   return (
     <div className="min-h-screen bg-[#F0F4F8] text-slate-900 font-bold flex flex-col font-sans selection:bg-amber-200 selection:text-slate-900">
       
-      {/* 1. Header Suite Sticky (Auto-hides smoothly on scroll down) */}
+      {/* 1. Header Suite Sticky (Compact, auto-hides smoothly on scroll down) */}
       <div className={`sticky top-0 z-40 w-full transition-transform duration-300 ease-in-out ${
         isHeaderVisible ? 'translate-y-0 shadow-md' : '-translate-y-full shadow-none'
       }`}>
         {/* Top Banner Institucional: GOV.CO y Alcaldía Mayor de Bogotá D.C. */}
-        <div className="bg-[#0B2545] border-b border-slate-800 text-xs text-slate-200 py-2.5 px-4 sm:px-8 shadow-sm">
-          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
+        <div className="bg-[#0B2545] border-b border-slate-800 text-[10px] text-slate-200 py-1 px-3 sm:px-6 shadow-sm">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
               <a 
                 href="https://www.gov.co" 
                 target="_blank" 
                 rel="noreferrer"
-                className="font-bold text-[#FFC800] tracking-wider uppercase text-[11px] hover:underline flex items-center gap-1"
+                className="font-bold text-[#FFC800] tracking-wider uppercase text-[10px] hover:underline flex items-center gap-1"
               >
                 <span>GOV.CO</span>
                 <span className="w-1.5 h-1.5 rounded-full bg-[#FFC800]"></span>
               </a>
               <span className="text-slate-400">·</span>
-              <span className="text-slate-100 font-semibold text-[11px] sm:text-xs">
+              <span className="text-slate-100 font-medium text-[10px] sm:text-[11px]">
                 Alcaldía Mayor de Bogotá D.C. · Secretaría Distrital de Salud
               </span>
             </div>
 
-            <div className="flex items-center gap-4 text-[11px] text-slate-300">
+            <div className="flex items-center gap-3 text-[10px] text-slate-300">
               <a 
                 href={GOOGLE_DRIVE_FOLDER_URL} 
                 target="_blank" 
                 rel="noreferrer"
-                className="text-cyan-200 hover:text-white flex items-center gap-1 underline font-semibold transition"
+                className="text-cyan-200 hover:text-white flex items-center gap-1 underline font-medium transition"
               >
-                <ExternalLink className="w-3 h-3" />
-                <span>Google Drive del Proyecto</span>
+                <ExternalLink className="w-2.5 h-2.5" />
+                <span>Google Drive</span>
               </a>
               <span className="hidden sm:inline">·</span>
               <span className="text-emerald-300 font-medium flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                Guardia Psicológica Activa 24/7
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                Guardia 24/7
               </span>
             </div>
           </div>
         </div>
 
-        {/* Top Header Bar con Logo y Accesos */}
-        <div className="bg-white/95 backdrop-blur-md border-b border-slate-200 py-3 px-4 sm:px-6 lg:px-8">
-          <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <SubaTechLogo size="lg" showTagline={true} />
+        {/* Top Header Bar con Logo y Accesos Compactos */}
+        <div className="bg-white/95 backdrop-blur-md border-b border-slate-200 py-1 px-3 sm:px-6">
+          <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <SubaTechLogo size="sm" showTagline={true} />
             </div>
 
             {/* CTA Buttons para Abrir Pop-up de Acceso / Registro */}
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
                 onClick={() => {
@@ -441,9 +441,9 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
                   setShowAuthModal(true);
                   if (onNavigate) onNavigate('login');
                 }}
-                className="px-5 py-2.5 rounded-xl font-bold text-xs bg-[#0B2545] hover:bg-[#003366] text-white shadow-md flex items-center gap-2 transition active:scale-95 cursor-pointer"
+                className="px-3 py-1 rounded-lg font-bold text-xs bg-[#0B2545] hover:bg-[#003366] text-white shadow-sm flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
               >
-                <LogIn className="w-4 h-4 text-[#FFC800]" />
+                <LogIn className="w-3.5 h-3.5 text-[#FFC800]" />
                 <span>Iniciar Sesión</span>
               </button>
 
@@ -455,29 +455,20 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
                   setShowAuthModal(true);
                   if (onNavigate) onNavigate('registro');
                 }}
-                className="px-5 py-2.5 rounded-xl font-bold text-xs bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 hover:border-slate-400 flex items-center gap-2 transition active:scale-95 cursor-pointer shadow-sm"
+                className="px-3 py-1 rounded-lg font-bold text-xs bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 flex items-center gap-1.5 transition active:scale-95 cursor-pointer shadow-sm"
               >
-                <UserPlus className="w-4 h-4 text-emerald-600" />
-                <span>Crear Cuenta de Psicólogo(a)</span>
+                <UserPlus className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Crear Cuenta</span>
               </button>
 
               {/* Botón de Accesibilidad con Silla de Ruedas */}
               <button
                 type="button"
                 onClick={() => setShowAccessibility(true)}
-                className="p-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 hover:border-cyan-500 text-slate-700 hover:text-slate-900 transition flex items-center gap-1.5 text-xs font-semibold cursor-pointer shadow-sm group"
+                className="px-2.5 py-1 rounded-lg bg-white hover:bg-slate-50 border border-slate-300 hover:border-cyan-500 text-slate-700 transition flex items-center gap-1 text-xs font-semibold cursor-pointer shadow-sm"
                 title="Opciones de Accesibilidad e Inclusión"
-                aria-label="Ajustes de accesibilidad"
               >
-                <svg 
-                  className="w-4 h-4 text-cyan-600 group-hover:scale-110 transition-transform" 
-                  viewBox="0 0 24 24" 
-                  fill="none" 
-                  stroke="currentColor" 
-                  strokeWidth="2.2" 
-                  strokeLinecap="round" 
-                  strokeLinejoin="round"
-                >
+                <svg className="w-3.5 h-3.5 text-cyan-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
                   <circle cx="12" cy="4.5" r="2.5"/>
                   <path d="M10 9h4l2 5h-3"/>
                   <path d="M7.5 13.5a5.5 5.5 0 1 0 7.2 4.7"/>
