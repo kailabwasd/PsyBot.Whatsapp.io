@@ -871,46 +871,68 @@ TUS PRINCIPIOS CLÍNICOS DE RESPUESTA PERSONALIZADA:
 
 // Helper: Context-aware personalized empathetic responder when external LLM has quota limits or is offline
 function generateSmartClinicalResponse(prompt: string, session?: PatientSession): string {
-  const lower = prompt.toLowerCase();
+  const lower = prompt.toLowerCase().trim();
   const userName = session?.userName && session.userName !== 'Paciente WhatsApp' ? session.userName : '';
   const greeting = userName ? `Hola *${userName}*, ` : 'Hola, ';
+  const msgCount = session?.messages?.length || 1;
+
+  // Varied empathetic openers
+  const openers = [
+    `${greeting}te escucho con mucha empatía y atención. `,
+    `${greeting}gracias por compartir esto conmigo. `,
+    `${greeting}comprendo la carga emocional que esto implica para ti. `,
+    `${greeting}valoro mucho tu confianza al expresar lo que estás viviendo. `,
+  ];
+  const selectedOpener = openers[msgCount % openers.length];
 
   // Miedo, pánico, ansiedad
   if (lower.includes('ansiedad') || lower.includes('ansioso') || lower.includes('ansiosa') || lower.includes('panico') || lower.includes('pánico') || lower.includes('nervios') || lower.includes('asustado') || lower.includes('miedo')) {
-    return `${greeting}*comprendo profundamente cómo la ansiedad puede acelerar tus pensamientos y hacerte sentir que pierdes el control.* Lo que estás experimentando en tu cuerpo es una respuesta de alerta, pero aquí estás a salvo.\n\nVamos a dar un paso a la vez. Hagamos un breve ejercicio de anclaje ahora mismo:\n1. *Inhala suavemente* por la nariz contando 4 segundos.\n2. *Sostén el aire* 4 segundos sintiendo tus pies firmes en el suelo.\n3. *Exhala despacio* por la boca en 6 segundos soltando los hombros.\n\n¿Qué sensación física o pensamiento predomina con más fuerza en este momento? Si en cualquier instante prefieres ser atendido por un psicólogo humano de nuestro equipo de guardia, solo escribe *#psicologo*.`;
+    const anxietyReplies = [
+      `${selectedOpener}*comprendo profundamente cómo la ansiedad aceleró tus pensamientos.* Lo que estás experimentando en tu cuerpo es una respuesta de alerta física, pero en este momento estás en un espacio seguro.\n\nHagamos un ejercicio de anclaje de 30 segundos:\n1. *Inhala lentamente* por la nariz contando 4 segundos.\n2. *Sostén la respiración* 4 segundos sintiendo tus pies firmes en el suelo.\n3. *Exhala despacio* por la boca en 6 segundos soltando los hombros.\n\n¿Qué pensamiento o sensación física sientes con mayor fuerza en este momento? (Si prefieres ser atendido por un psicólogo humano real, escribe *#psicologo*).`,
+      `${selectedOpener}*sé lo agotadora que puede ser la opresión por la ansiedad.* Cuando la mente se desborda, el cuerpo reacciona en alerta máxima.\n\nVamos a traer la atención al presente: nombra 3 objetos que veas a tu alrededor y haz una inhalación profunda. Tómate tu tiempo. ¿En qué parte del cuerpo sientes más la tensión? (Recuerda que si deseas atención de un terapeuta de guardia, solo escribe *#psicologo*).`
+    ];
+    return anxietyReplies[msgCount % anxietyReplies.length];
   }
 
   // Tristeza, depresión, llanto, vacío, soledad
   if (lower.includes('triste') || lower.includes('depre') || lower.includes('llorar') || lower.includes('desanimo') || lower.includes('desánimo') || lower.includes('solo') || lower.includes('sola') || lower.includes('vacio') || lower.includes('vacío') || lower.includes('soledad') || lower.includes('desesper')) {
-    return `${greeting}*lamento mucho que estés atravesando este momento tan doloroso y pesado.* Sentir ganas de llorar o experimentar ese vacío es completamente válido; no tienes que exigirle a tu mente estar bien de inmediato ni tienes que cargar esto en soledad.\n\nQuiero que sepas que este es un espacio seguro donde puedes desahogarte con total libertad. ¿Qué fue lo que detonó con más fuerza este sentimiento hoy? Recuerda que si deseas la atención de un psicólogo humano real, escribe *#psicologo*.`;
+    const sadnessReplies = [
+      `${selectedOpener}*lamento mucho que estés atravesando este dolor tan pesado.* Sentir ganas de llorar o experimentar ese vacío es totalmente válido; no tienes que exigirte estar bien de inmediato ni cargar esto a solas.\n\nEste es un espacio confidencial donde puedes desahogarte libremente. ¿Qué situación o pensamiento detonó con más fuerza este sentimiento hoy? (Recuerda que para hablar con un especialista humano de guardia, escribe *#psicologo*).`,
+      `${selectedOpener}*el dolor y la soledad a veces se sienten abrumadores.* Permítete sentir sin juzgarte; la tristeza también es una forma en que la mente nos pide una pausa y cuidado.\n\nAquí no hay juicios. Si pudieras ponerle palabras a lo que más te duele hoy, ¿qué te gustaría expresar? (Escribe *#psicologo* en cualquier momento para hablar con un profesional de guardia).`
+    ];
+    return sadnessReplies[msgCount % sadnessReplies.length];
   }
 
   // Problemas de pareja, ruptura, desamor, celos
   if (lower.includes('pareja') || lower.includes('novio') || lower.includes('novia') || lower.includes('esposo') || lower.includes('esposa') || lower.includes('terminamos') || lower.includes('engañ') || lower.includes('ruptura') || lower.includes('celos')) {
-    return `${greeting}*los procesos vinculares y las rupturas o conflictos de pareja tocan las fibras más sensibles de nuestra identidad.* Es natural sentir confusión, dolor en el pecho o una mezcla de apego y frustración.\n\nCuando las emociones hacia otra persona nos desbordan, el primer paso es volver a nosotras y nosotros mismos con compasión. ¿Sientes que esta situación está afectando tu tranquilidad en tu día a día? (Escribe *#psicologo* si deseas atención humana de guardia).`;
+    return `${selectedOpener}*los procesos vinculares y las rupturas tocan las fibras más profundas de nuestra vida.* Es comprensible sentir confusión, nostalgia o una mezcla de afecto y dolor.\n\nCuando las emociones hacia otra persona nos abruman, el primer paso es volver a nosotras y nosotros mismos con gentileza. ¿Sientes que esta situación está afectando tu tranquilidad en la rutina diaria? (Escribe *#psicologo* para atención humana).`;
   }
 
   // Insomnio, problemas de sueño, agotamiento extremo
   if (lower.includes('dormir') || lower.includes('insomnio') || lower.includes('pesadilla') || lower.includes('cansado') || lower.includes('cansada') || lower.includes('agotado') || lower.includes('desvelo')) {
-    return `${greeting}*el descanso es el pilar biológico de nuestra salud emocional.* Cuando llevamos tiempo con la mente sobrecargada, el cuerpo entra en tensión y no logra desconectar por la noche.\n\nPara esta noche, intenta soltar la exigencia de quedarte dormido(a) de inmediato. Simplemente permite que tu cuerpo repose sin juzgar tus pensamientos. ¿Hay alguna preocupación recurrente que esté dando vueltas en tu mente ahora mismo? (Si deseas hablar con un especialista de guardia, escribe *#psicologo*).`;
+    return `${selectedOpener}*el descanso es el pilar de la salud mental.* Cuando llevamos tiempo con la mente sobrecargada, el cuerpo permanece en alerta e impide conciliar el sueño.\n\nPara esta noche, suelta la exigencia de quedarte dormido(a) de inmediato. Simplemente permite que tu cuerpo repose. ¿Hay alguna preocupación puntual que no te deja descansar? (Para atención con psicólogo humano, escribe *#psicologo*).`;
   }
 
   // Enojo, rabia, frustración, ira
   if (lower.includes('rabia') || lower.includes('ira') || lower.includes('enojo') || lower.includes('enojado') || lower.includes('enojada') || lower.includes('molesto') || lower.includes('frustrado') || lower.includes('frustrada') || lower.includes('bronca')) {
-    return `${greeting}*la rabia y la frustración son emociones muy intensas que nos señalan que un límite importante fue cruzado.* Es comprensible que sientas esa energía en el pecho o la mandíbula.\n\nEn lugar de reprimir el enojo, vamos a canalizarlo sin dañarte: toma una respiración profunda, suelta los puños y permítete nombrar exactamente qué te pareció injusto. ¿Qué causó este enojo hoy?`;
+    return `${selectedOpener}*la rabia y la frustración nos indican que un límite importante fue sobrepasado.* Es natural sentir esa energía e impulsividad en el cuerpo.\n\nEn lugar de reprimir el enojo, vamos a canalizarlo sin dañarte: afloja los hombros, suelta los puños y nombra qué te pareció injusto. ¿Qué causó esta molestia hoy? (Escribe *#psicologo* para guía con terapeuta humano).`;
   }
 
   // Saludos y presentación
   if (lower.includes('gracias') || lower.includes('hola') || lower.includes('buenos') || lower.includes('buenas') || lower.includes('que tal')) {
-    return `👋 ${greeting}*es un gusto saludarte.* Soy Aura, tu especialista de apoyo y contención emocional de SubaTECH Salud Mental Bogotá. Estoy aquí disponible para escucharte, orientarte y acompañarte en lo que necesites hoy.\n\n¿Cómo te has sentido en estos últimos días y en qué te gustaría que enfoquemos nuestra conversación? (Recuerda que si en algún momento deseas un profesional humano, escribe *#psicologo*).`;
+    return `👋 ${selectedOpener}Soy Aura, tu especialista de apoyo y contención emocional de PsyBot - SubaTech Salud Mental. Estoy disponible 24/7 para escucharte y acompañarte.\n\n¿Cómo te has sentido en estos últimos días y sobre qué te gustaría conversar hoy? (Recuerda que si en algún momento deseas un profesional humano, escribe *#psicologo*).`;
   }
 
-  // Respuesta reflexiva contextual personalizada
+  // Respuesta reflexiva contextual con cita personalizada
   const snippet = prompt.length > 50 ? `${prompt.substring(0, 48)}...` : prompt;
-  return `${greeting}*te escucho con toda atención.* Cuando me cuentas que *"${snippet}"*, noto que hay un peso significativo detrás de tus palabras, y quiero felicitarte por tener la valentía de ponerlo en palabras.\n\nExpresar lo que vivimos es el primer paso para procesarlo. ¿Desde hace cuánto tiempo vienes sintiendo esto, y cómo te ha afectado en tu rutina diaria? Si prefieres continuar con un psicólogo humano del equipo de guardia, recuerda que solo debes escribir *#psicologo*.`;
+  const reflectiveReplies = [
+    `${selectedOpener}Al leer tu mensaje sobre *"${snippet}"*, noto que hay un peso emocional significativo detrás de tus palabras. Felicidades por la valentía de compartirlo.\n\nExpresar lo que vivimos es el primer paso para sanar. ¿Desde hace cuánto tiempo vienes sintiendo esto? (Si deseas continuar con un psicólogo humano de guardia, escribe *#psicologo*).`,
+    `${selectedOpener}Te escucho con absoluta atención cuando mencionas que *"${snippet}"*. Reconocer esta situación requiere coraje.\n\n¿De qué forma sientes que esto ha impactado tus emociones o actividades en los últimos días? (Recuerda que para atención directa con especialista humano, puedes escribir *#psicologo*).`
+  ];
+  return reflectiveReplies[msgCount % reflectiveReplies.length];
 }
 
-// Call Gemini API with model fallback hierarchy (gemini-3.1-flash-lite -> gemini-2.5-flash -> adaptive smart engine)
+// Call Gemini API with model fallback hierarchy (gemini-3.8-flash -> gemini-3.1-flash-lite -> gemini-2.5-flash -> adaptive smart engine)
 async function callGeminiWithRetry(
   prompt: string, 
   contextMessages: ChatMessage[], 
@@ -921,7 +943,7 @@ async function callGeminiWithRetry(
     return generateSmartClinicalResponse(prompt, session);
   }
 
-  const candidateModels = ['gemini-3.1-flash-lite', 'gemini-2.5-flash'];
+  const candidateModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
   const formattedHistory = contextMessages
     .slice(-8)
     .map(m => `${m.sender === 'user' ? (session?.userName || 'Paciente') : 'Aura (Psicóloga IA SubaTECH)'}: ${m.text}`)

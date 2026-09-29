@@ -392,6 +392,34 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
             </div>
           </div>
 
+          {/* Banner de Estado de Modo Actual de Atención */}
+          <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2">
+              {currentSession.state === 'HUMAN_MODE' ? (
+                <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  👨‍⚕️ Atención Humana Activa ({currentSession.assignedPsychologistName || currentSpecialist.name})
+                </span>
+              ) : currentSession.state === 'WAITING_PSYCHOLOGIST' ? (
+                <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1.5 animate-pulse">
+                  <Clock className="w-3.5 h-3.5 text-amber-400" />
+                  ⌛ En Espera de Asignación por Psicólogo de Guardia
+                </span>
+              ) : (
+                <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 flex items-center gap-1.5">
+                  <Bot className="w-3.5 h-3.5 text-cyan-400" />
+                  🤖 Asistencia Emocional con IA (Aura 24/7)
+                </span>
+              )}
+            </div>
+
+            {currentSession.riskLevel === 'CRISIS' && (
+              <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-red-500/20 text-red-300 border border-red-500/40 animate-pulse">
+                🚨 CÓDIGO ROJO / CRISIS
+              </span>
+            )}
+          </div>
+
           {/* Indicador Visual de Sentimiento Gemini en el Último Mensaje */}
           <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
             <div className="flex items-center gap-2">
