@@ -206,3 +206,29 @@ export function subscribeToActiveSessions(callback: (sessions: PatientSession[])
     console.warn('Active sessions subscription warning:', error);
   });
 }
+
+/**
+ * Delete a single active session from Firestore
+ */
+export async function deleteActiveSessionFromFirestore(sessionId: string): Promise<void> {
+  try {
+    const normalizedId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const docRef = doc(db, SESSIONS_COLLECTION, normalizedId);
+    await deleteDoc(docRef);
+  } catch (err) {
+    console.error('Error deleting active session from Firestore:', err);
+  }
+}
+
+/**
+ * Delete all active sessions from Firestore
+ */
+export async function deleteAllActiveSessionsFromFirestore(): Promise<void> {
+  try {
+    const snapshot = await getDocs(collection(db, SESSIONS_COLLECTION));
+    const deletePromises = snapshot.docs.map((docSnap) => deleteDoc(docSnap.ref));
+    await Promise.all(deletePromises);
+  } catch (err) {
+    console.error('Error deleting all active sessions from Firestore:', err);
+  }
+}

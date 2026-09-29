@@ -27,9 +27,17 @@ import {
   FileEdit,
   UserCheck,
   ShieldAlert,
-  ChevronDown
+  ChevronDown,
+  Trash2,
+  UserX,
+  AlertTriangle,
+  HeartPulse,
+  Search,
+  Phone,
+  Users,
+  Clock
 } from 'lucide-react';
-import type { PsychologistAuthUser, PsychologistPermissions } from '../types/index.ts';
+import type { PsychologistAuthUser, PsychologistPermissions, PatientSession } from '../types/index.ts';
 import { savePsychologistProfile } from '../lib/firebase.ts';
 import { AuditLog, logAuditEvent } from './AuditLog.tsx';
 
@@ -46,6 +54,9 @@ interface SettingsModalProps {
   ) => void;
   themeMode: 'light' | 'dark' | 'subatech';
   onThemeChange: (theme: 'light' | 'dark' | 'subatech') => void;
+  sessions?: PatientSession[];
+  onDeleteSession?: (sessionId: string) => Promise<void>;
+  onClearAllSessions?: () => Promise<void>;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -56,8 +67,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onUpdatePsychologistRole,
   themeMode,
   onThemeChange,
+  sessions = [],
+  onDeleteSession,
+  onClearAllSessions,
 }) => {
-  const [activeTab, setActiveTab] = useState<'profile' | 'twofactor' | 'admins' | 'theme' | 'audit'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'twofactor' | 'admins' | 'patients' | 'theme' | 'audit'>('profile');
   
   // Profile editing local state
   const [displayName, setDisplayName] = useState(currentUser.displayName || '');
@@ -78,6 +92,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [twoFactorSuccess, setTwoFactorSuccess] = useState<string | null>(null);
   const [copiedSecret, setCopiedSecret] = useState(false);
 
+  // Patient Management State
+  const [patientSearch, setPatientSearch] = useState('');
+  const [confirmClearAllOpen, setConfirmClearAllOpen] = useState(false);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
+  const [deletingPatientId, setDeletingPatientId] = useState<string | null>(null);
+  const [patientActionNotice, setPatientActionNotice] = useState<string | null>(null);
+
   const isOwner = currentUser.email === 'kailabwasd@gmail.com' || currentUser.isAdmin;
 
   // Roles y Permisos State Management
@@ -90,6 +111,54 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     isSaving?: boolean;
     savedNotice?: boolean;
   }>>({});
+
+  const handleClearAllPatients = async () => {
+    setIsDeletingAll(true);
+    try {
+      if (onClearAllSessions) {
+        await onClearAllSessions();
+      }
+      await logAuditEvent({
+        adminEmail: currentUser.email || 'kailabwasd@gmail.com',
+        adminName: currentUser.displayName || 'Administrador',
+        action: 'SYSTEM_CONFIG',
+        severity: 'CRITICAL',
+        category: 'SISTEMA',
+        details: `Purga total de pacientes: Se eliminaron todos los pacientes (${sessions?.length || 0}) de la guardia Triage en memoria y Firestore.`,
+      });
+      setPatientActionNotice('Todos los pacientes han sido eliminados de la guardia exitosamente.');
+      setConfirmClearAllOpen(false);
+      setTimeout(() => setPatientActionNotice(null), 4000);
+    } catch (err) {
+      console.error('Error clearing patients:', err);
+      setPatientActionNotice('Error al purgar los pacientes.');
+    } finally {
+      setIsDeletingAll(false);
+    }
+  };
+
+  const handleDeleteSinglePatient = async (session: PatientSession) => {
+    setDeletingPatientId(session.id);
+    try {
+      if (onDeleteSession) {
+        await onDeleteSession(session.id);
+      }
+      await logAuditEvent({
+        adminEmail: currentUser.email || 'kailabwasd@gmail.com',
+        adminName: currentUser.displayName || 'Administrador',
+        action: 'SYSTEM_CONFIG',
+        severity: 'WARNING',
+        category: 'SISTEMA',
+        details: `Eliminación de paciente en guardia: ${session.userName} (${session.phoneNumber || session.id}).`,
+      });
+      setPatientActionNotice(`Paciente ${session.userName} eliminado de la guardia.`);
+      setTimeout(() => setPatientActionNotice(null), 3000);
+    } catch (err) {
+      console.error('Error deleting patient:', err);
+    } finally {
+      setDeletingPatientId(null);
+    }
+  };
 
   const STANDARD_CLINICAL_ROLES = [
     'Psicólogo(a) Clínico(a) Titulado(a)',
@@ -373,6 +442,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             >
               <ShieldCheck className="w-4 h-4 text-[#2BF267]" />
               <span>Roles y Permisos</span>
+            </button>
+          )}
+
+          {isOwner && (
+            <button
+              onClick={() => setActiveTab('patients')}
+              className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition cursor-pointer whitespace-nowrap ${activeTab === 'patients' ? 'border-[#C8102E] text-red-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+            >
+              <UserX className="w-4 h-4 text-red-400" />
+              <span>Gestión de Pacientes</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-950/80 text-red-300 border border-red-500/40 font-mono">
+                {sessions.length}
+              </span>
             </button>
           )}
 
@@ -1009,6 +1091,246 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </div>
                     );
                   })
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB: GESTIÓN DE PACIENTES EN GUARDIA / TRIAGE (ADMINS) */}
+          {activeTab === 'patients' && (
+            <div className="space-y-6 animate-in fade-in">
+              {/* Header Context Banner */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-red-950/40 via-slate-900 to-amber-950/30 border border-red-500/30 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-red-400 font-bold text-sm">
+                    <UserX className="w-5 h-5 text-red-400" />
+                    <span>Control y Purgado de Pacientes en Guardia Triage</span>
+                  </div>
+                  <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/40 font-mono font-bold">
+                    Área Exclusiva de Administradores
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Como administrador clínico, desde aquí puedes gestionar, purgar y eliminar los pacientes activos en la bandeja de guardia de Triage tanto del servidor como de la base de datos en tiempo real de Firestore.
+                </p>
+              </div>
+
+              {/* Patient Action Notice */}
+              {patientActionNotice && (
+                <div className="p-3 bg-emerald-950/80 border border-emerald-500/50 rounded-xl text-emerald-200 text-xs flex items-center justify-between animate-in fade-in">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>{patientActionNotice}</span>
+                  </div>
+                  <button onClick={() => setPatientActionNotice(null)} className="text-emerald-400 hover:text-white">✕</button>
+                </div>
+              )}
+
+              {/* Métricas de la Guardia */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 flex flex-col justify-between">
+                  <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-slate-400" /> Total Pacientes
+                  </span>
+                  <span className="text-xl font-black text-white mt-1 font-mono">{sessions.length}</span>
+                </div>
+
+                <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 flex flex-col justify-between">
+                  <span className="text-[11px] text-amber-400 font-medium flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-amber-400" /> En Espera Triage
+                  </span>
+                  <span className="text-xl font-black text-amber-300 mt-1 font-mono">
+                    {sessions.filter(s => s.state === 'WAITING_PSYCHOLOGIST').length}
+                  </span>
+                </div>
+
+                <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 flex flex-col justify-between">
+                  <span className="text-[11px] text-red-400 font-medium flex items-center gap-1.5">
+                    <ShieldAlert className="w-3.5 h-3.5 text-red-400" /> Código Rojo / Crisis
+                  </span>
+                  <span className="text-xl font-black text-red-400 mt-1 font-mono">
+                    {sessions.filter(s => s.riskLevel === 'CRISIS').length}
+                  </span>
+                </div>
+
+                <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 flex flex-col justify-between">
+                  <span className="text-[11px] text-emerald-400 font-medium flex items-center gap-1.5">
+                    <HeartPulse className="w-3.5 h-3.5 text-emerald-400" /> Con Psicólogo
+                  </span>
+                  <span className="text-xl font-black text-emerald-400 mt-1 font-mono">
+                    {sessions.filter(s => s.state === 'HUMAN_MODE').length}
+                  </span>
+                </div>
+              </div>
+
+              {/* Acciones Globales de Purga y Mantenimiento */}
+              <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-4">
+                <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-cyan-400" /> Acciones Globales de Mantenimiento
+                </h4>
+
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                  {/* Botón Purgar Todos */}
+                  <button
+                    type="button"
+                    onClick={() => setConfirmClearAllOpen(true)}
+                    disabled={sessions.length === 0 || isDeletingAll}
+                    className="flex-1 px-4 py-2.5 bg-red-600/20 hover:bg-red-600/30 text-red-300 hover:text-red-200 border border-red-500/40 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-md shadow-red-950"
+                  >
+                    <Trash2 className="w-4 h-4 text-red-400" />
+                    <span>Eliminar Todos los Pacientes en Guardia ({sessions.length})</span>
+                  </button>
+                </div>
+
+                {/* Modal / Dialogo de Confirmación para Purgar Todos */}
+                {confirmClearAllOpen && (
+                  <div className="p-4 rounded-xl bg-red-950/80 border border-red-500/50 space-y-3 animate-in fade-in">
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                      <div className="space-y-1">
+                        <h5 className="text-xs font-bold text-red-200">¿Confirmas la eliminación total de todos los pacientes?</h5>
+                        <p className="text-[11px] text-red-300/80 leading-relaxed">
+                          Esta acción eliminará de forma irreversible todas las sesiones activas ({sessions.length} pacientes) de la base de datos Firestore, la memoria del servidor y la bandeja de guardia.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmClearAllOpen(false)}
+                        disabled={isDeletingAll}
+                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleClearAllPatients}
+                        disabled={isDeletingAll}
+                        className="px-4 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs font-bold flex items-center gap-1.5 shadow"
+                      >
+                        {isDeletingAll ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Eliminando...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Sí, Eliminar Todos</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Lista Detallada de Pacientes */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Users className="w-4 h-4 text-slate-400" /> Pacientes Registrados en la Guardia ({sessions.length})
+                  </h4>
+
+                  <div className="relative w-48 sm:w-64">
+                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-500" />
+                    <input
+                      type="text"
+                      placeholder="Buscar por nombre o teléfono..."
+                      value={patientSearch}
+                      onChange={(e) => setPatientSearch(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-750 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-red-400"
+                    />
+                  </div>
+                </div>
+
+                {sessions.length === 0 ? (
+                  <div className="p-8 bg-slate-950 rounded-2xl border border-slate-800 text-center space-y-2">
+                    <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto opacity-70" />
+                    <h5 className="text-xs font-bold text-white">Guardia Triage Limpia</h5>
+                    <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
+                      No hay pacientes en la bandeja de guardia en este momento. Los nuevos pacientes que escriban por WhatsApp o se registren aparecerán aquí automáticamente.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-800 border border-slate-800 rounded-2xl bg-slate-950 overflow-hidden">
+                    {sessions
+                      .filter(s => {
+                        if (!patientSearch.trim()) return true;
+                        const query = patientSearch.toLowerCase();
+                        return (
+                          (s.userName || '').toLowerCase().includes(query) ||
+                          (s.phoneNumber || '').toLowerCase().includes(query) ||
+                          (s.id || '').toLowerCase().includes(query) ||
+                          (s.primaryEmotion || '').toLowerCase().includes(query)
+                        );
+                      })
+                      .map((session) => {
+                        const isDeletingThis = deletingPatientId === session.id;
+                        return (
+                          <div
+                            key={session.id}
+                            className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-900/60 transition"
+                          >
+                            <div className="space-y-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-bold text-white truncate">
+                                  {session.userName || 'Paciente WhatsApp'}
+                                </span>
+                                {session.age && (
+                                  <span className="text-[10px] text-slate-400">
+                                    • {session.age} {session.gender ? `(${session.gender})` : ''}
+                                  </span>
+                                )}
+                                <span className={`text-[10px] px-2 py-0.2 rounded font-semibold ${
+                                  session.riskLevel === 'CRISIS' ? 'bg-red-500/20 text-red-300 border border-red-500/30' :
+                                  session.riskLevel === 'ALTO' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
+                                  'bg-teal-500/20 text-teal-300 border border-teal-500/30'
+                                }`}>
+                                  {session.riskLevel}
+                                </span>
+                                <span className="text-[10px] px-2 py-0.2 rounded bg-slate-800 text-slate-300 font-mono">
+                                  {session.state === 'HUMAN_MODE' ? 'Con Psicólogo' : session.state === 'CRISIS_ALERT' ? 'Alerta Roja' : 'En Espera'}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-3 text-[11px] text-slate-400 flex-wrap">
+                                <span className="flex items-center gap-1 font-mono text-slate-300">
+                                  <Phone className="w-3 h-3 text-slate-500" />
+                                  {session.phoneNumber || session.id}
+                                </span>
+                                {session.primaryEmotion && (
+                                  <span className="text-teal-400 truncate max-w-xs">
+                                    Emoción: {session.primaryEmotion}
+                                  </span>
+                                )}
+                                <span className="text-slate-500">
+                                  {session.messages?.length || 0} mensajes
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                              <button
+                                type="button"
+                                disabled={isDeletingThis || isDeletingAll}
+                                onClick={() => handleDeleteSinglePatient(session)}
+                                className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/25 text-red-300 hover:text-red-200 border border-red-500/30 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-40"
+                                title="Eliminar este paciente de la guardia"
+                              >
+                                {isDeletingThis ? (
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-red-400" />
+                                ) : (
+                                  <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                                )}
+                                <span>{isDeletingThis ? 'Eliminando...' : 'Eliminar'}</span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
                 )}
               </div>
             </div>

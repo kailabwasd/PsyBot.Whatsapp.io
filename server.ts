@@ -577,127 +577,35 @@ function seedInitialSessions() {
     console.error('Error loading sessions from file:', err);
   }
 
-  // Initial seed if file does not exist or is empty
-  const now = Date.now();
-  const initialSessionsList: PatientSession[] = [
-    {
-      id: 'whatsapp:+5215591823049',
-      phoneNumber: '+52 1 55 9182 3049',
-      userName: 'Carlos Morales',
-      age: '34',
-      gender: 'Masculino',
-      state: 'WAITING_PSYCHOLOGIST',
-      riskLevel: 'ALTO',
-      primaryEmotion: 'Ataque de Pánico y Disnea',
-      triageSummary: 'Paciente reporta dolor opresivo en tórax, hiperventilación y angustia severa tras conflicto familiar. Descarta origen fisiológico.',
-      startedAt: now - 1000 * 60 * 25,
-      lastActivityAt: now - 1000 * 60 * 2,
-      clinicalNotes: 'Paciente de 34 años con crisis de pánico. Requiere contención mediante respiración diafragmática y focalización sensorial.',
-      diagnosticImpressions: ['Trastorno de Pánico (CIE-10 F41.0)', 'Ansiedad Aguda'],
-      tags: ['Crisis de Pánico', 'Prioridad Alta', 'Suba Norte'],
-      sentimentScore: -0.65,
-      termsAccepted: true,
-      messages: [
-        {
-          id: `m-1-${now}`,
-          sender: 'user',
-          text: 'Ayuda por favor, siento que no puedo respirar y el corazón me va a mil por hora.',
-          timestamp: now - 1000 * 60 * 25,
-        },
-        {
-          id: `m-2-${now}`,
-          sender: 'bot',
-          text: '🌿 Carlos, estoy aquí contigo. Por favor toma una inhalación profunda en 4 tiempos. Tu caso ha sido asignado con prioridad ALTA en nuestra guardia psicológica.',
-          timestamp: now - 1000 * 60 * 24,
-        },
-        {
-          id: `m-3-${now}`,
-          sender: 'user',
-          text: 'Siento que perderé el control, ¿cuándo se conecta el psicólogo?',
-          timestamp: now - 1000 * 60 * 2,
-        }
-      ]
-    },
-    {
-      id: 'whatsapp:+5491187654321',
-      phoneNumber: '+54 9 11 8765 4321',
-      userName: 'Valeria Domínguez',
-      age: '26',
-      gender: 'Femenino',
-      state: 'CRISIS_ALERT',
-      riskLevel: 'CRISIS',
-      primaryEmotion: 'Desesperanza Profunda e Ideación Suicida',
-      triageSummary: '🚨 CÓDIGO ROJO: Paciente expresa ideación de muerte explícita ("no le encuentro sentido a seguir"). Red de apoyo limitada.',
-      startedAt: now - 1000 * 60 * 45,
-      lastActivityAt: now - 1000 * 60 * 5,
-      clinicalNotes: 'Alerta de crisis activada. Protocolo de acompañamiento urgente. Se proporcionó número de Línea 106 y 192.',
-      diagnosticImpressions: ['Episodio Depresivo Mayor con Ideación Suicida', 'Riesgo Inminente'],
-      tags: ['CÓDIGO ROJO', 'Crisis Inminente', 'Contención Directa'],
-      sentimentScore: -0.9,
-      termsAccepted: true,
-      messages: [
-        {
-          id: `m-v1-${now}`,
-          sender: 'user',
-          text: 'Ya no puedo más con esta presión, no quiero seguir sufriendo.',
-          timestamp: now - 1000 * 60 * 45,
-        },
-        {
-          id: `m-v2-${now}`,
-          sender: 'bot',
-          text: '🚨 Valeria, tu vida es infinitamente valiosa. He activado la CÓDIGO ROJO de Guardia para que un especialista humano te atienda de inmediato.',
-          timestamp: now - 1000 * 60 * 44,
-        },
-        {
-          id: `m-v3-${now}`,
-          sender: 'user',
-          text: 'Por favor, necesito hablar con alguien que me escuche sin juzgarme.',
-          timestamp: now - 1000 * 60 * 5,
-        }
-      ]
-    },
-    {
-      id: 'whatsapp:+56976543210',
-      phoneNumber: '+56 9 7654 3210',
-      userName: 'Mateo Herrera',
-      age: '41',
-      gender: 'Masculino',
-      state: 'WAITING_PSYCHOLOGIST',
-      riskLevel: 'MODERADO',
-      primaryEmotion: 'Agotamiento Emocional (Burnout)',
-      triageSummary: 'Sobrecarga laboral crónica, apatía y somatización con dolores de cabeza frecuentes.',
-      startedAt: now - 1000 * 60 * 60,
-      lastActivityAt: now - 1000 * 60 * 15,
-      clinicalNotes: 'Paciente de 41 años evaluando estrategias de afrontamiento de estrés laboral.',
-      diagnosticImpressions: ['Síndrome de Burnout (Z73.0)'],
-      tags: ['Burnout', 'Estrés Laboral', 'Moderado'],
-      sentimentScore: -0.3,
-      termsAccepted: true,
-      messages: [
-        {
-          id: `m-m1-${now}`,
-          sender: 'user',
-          text: 'Hola, tengo semanas sin poder concentrarme en el trabajo y me siento colapsado.',
-          timestamp: now - 1000 * 60 * 60,
-        },
-        {
-          id: `m-m2-${now}`,
-          sender: 'bot',
-          text: '🌿 Mateo, gracias por escribirnos. He colocado tu caso en la bandeja de guardia psicológica para orientarte.',
-          timestamp: now - 1000 * 60 * 15,
-        }
-      ]
-    }
-  ];
-
+  // Start with clean state - only real incoming WhatsApp patient sessions appear
   sessions.clear();
-  for (const s of initialSessionsList) {
-    sessions.set(s.id, s);
-  }
   saveSessionsToFile();
 }
 
 seedInitialSessions();
+
+// Helper: Flexible lookup of patient sessions by ID, phone number or formatted key
+function findSessionById(idOrPhone: string): PatientSession | undefined {
+  if (!idOrPhone || typeof idOrPhone !== 'string') return undefined;
+  const clean = idOrPhone.trim();
+  if (sessions.has(clean)) return sessions.get(clean);
+
+  const withPrefix = clean.toLowerCase().startsWith('whatsapp:') ? clean : `whatsapp:${clean}`;
+  if (sessions.has(withPrefix)) return sessions.get(withPrefix);
+
+  const withoutPrefix = clean.replace(/^whatsapp:/i, '');
+  if (sessions.has(withoutPrefix)) return sessions.get(withoutPrefix);
+
+  const targetSanitized = sanitizeWhatsAppNumber(clean);
+  for (const s of sessions.values()) {
+    if (s.id === clean || s.id === withPrefix || s.id === withoutPrefix) return s;
+    if (s.phoneNumber && (s.phoneNumber === clean || s.phoneNumber === withoutPrefix)) return s;
+    if (targetSanitized && (sanitizeWhatsAppNumber(s.id) === targetSanitized || sanitizeWhatsAppNumber(s.phoneNumber) === targetSanitized)) {
+      return s;
+    }
+  }
+  return undefined;
+}
 
 // Helper: Detect crisis patterns
 function detectCrisisKeywords(text: string): boolean {
@@ -1302,10 +1210,41 @@ app.get('/api/sessions', (req, res) => {
   res.json({ sessions: allSessions });
 });
 
+// DELETE single session from triage/guardia
+app.delete('/api/sessions/:sessionId', (req, res) => {
+  const { sessionId } = req.params;
+  const session = findSessionById(sessionId);
+  if (session) {
+    sessions.delete(session.id);
+    if (session.phoneNumber) {
+      sessions.delete(session.phoneNumber);
+      sessions.delete(`whatsapp:${session.phoneNumber}`);
+    }
+  } else {
+    sessions.delete(sessionId);
+    sessions.delete(`whatsapp:${sessionId}`);
+    sessions.delete(sessionId.replace(/^whatsapp:/i, ''));
+  }
+  saveSessionsToFile();
+  res.json({ 
+    success: true, 
+    message: session ? `Paciente ${session.userName} eliminado de la guardia.` : 'Sesión eliminada.',
+    sessionId: session ? session.id : sessionId 
+  });
+});
+
+// POST clear all sessions from triage/guardia
+app.post('/api/sessions/clear-all', (req, res) => {
+  sessions.clear();
+  saveSessionsToFile();
+  console.log('[Admin] All patient sessions cleared from triage queue');
+  res.json({ success: true, message: 'Todos los pacientes han sido eliminados de la guardia.' });
+});
+
 // POST claim a case by psychologist
 app.post('/api/sessions/claim', async (req, res) => {
   const { sessionId, psychologistId, psychologistName } = req.body;
-  const session = sessions.get(sessionId);
+  const session = findSessionById(sessionId);
   if (!session) {
     return res.status(404).json({ error: 'Session not found' });
   }
@@ -1352,13 +1291,19 @@ app.post('/api/sessions/claim', async (req, res) => {
 // POST psychologist sends message to patient
 app.post('/api/sessions/message', async (req, res) => {
   const { sessionId, text, psychologistName } = req.body;
-  const session = sessions.get(sessionId);
+  const session = findSessionById(sessionId);
   if (!session) {
     return res.status(404).json({ error: 'Session not found' });
   }
 
   const senderName = psychologistName || session.assignedPsychologistName || 'Psicólogo Especialista';
   
+  // Ensure session is active in human mode and psychologist is registered
+  session.state = 'HUMAN_MODE';
+  if (!session.assignedPsychologistName) {
+    session.assignedPsychologistName = senderName;
+  }
+
   // Send directly to the patient's phone on WhatsApp
   const outboundText = `🩺 *${senderName}*:\n${text}`;
   const targetPhone = session.phoneNumber || session.id;
@@ -1382,7 +1327,57 @@ app.post('/api/sessions/message', async (req, res) => {
     success: true, 
     session, 
     message: newMsg,
-    twilioDelivery: sendResult 
+    twilioDelivery: sendResult,
+    twilioSid: sendResult.sid
+  });
+});
+
+// POST direct Twilio WhatsApp dispatch endpoint for psychologist chat
+app.post('/api/twilio/send-direct', async (req, res) => {
+  const { phoneNumber, sessionId, text, psychologistName } = req.body;
+  const targetPhone = phoneNumber || (sessionId ? findSessionById(sessionId)?.phoneNumber : undefined) || sessionId;
+
+  if (!targetPhone || !text) {
+    return res.status(400).json({ success: false, error: 'Faltan parámetros requeridos (phoneNumber, text).' });
+  }
+
+  const senderName = psychologistName || 'Psicólogo Especialista SubaTECH';
+  const outboundText = `🩺 *${senderName}*:\n${text}`;
+  const sendResult = await sendTwilioWhatsAppMessage(targetPhone, outboundText);
+
+  let session: PatientSession | undefined;
+  let newMsg: ChatMessage | undefined;
+
+  if (sessionId) {
+    session = findSessionById(sessionId);
+    if (session) {
+      session.state = 'HUMAN_MODE';
+      if (!session.assignedPsychologistName) {
+        session.assignedPsychologistName = senderName;
+      }
+      newMsg = {
+        id: `psy-${Date.now()}`,
+        sender: 'psychologist',
+        psychologistName: senderName,
+        text,
+        timestamp: Date.now(),
+        deliveryStatus: sendResult.success ? 'delivered' : 'failed',
+        deliveryError: sendResult.success ? undefined : sendResult.error,
+      };
+      session.messages.push(newMsg);
+      session.lastActivityAt = Date.now();
+      saveSessionsToFile();
+    }
+  }
+
+  res.json({
+    success: sendResult.success,
+    twilioSid: sendResult.sid,
+    error: sendResult.error,
+    errorCode: sendResult.errorCode,
+    deliveryStatus: sendResult.success ? 'delivered' : 'failed',
+    session,
+    message: newMsg,
   });
 });
 
@@ -1464,7 +1459,7 @@ app.post('/api/twilio/test', async (req, res) => {
 // POST transfer session back to AI or release to queue
 app.post('/api/sessions/transfer', (req, res) => {
   const { sessionId, target } = req.body; // 'AI_MODE' | 'WAITING_PSYCHOLOGIST'
-  const session = sessions.get(sessionId);
+  const session = findSessionById(sessionId);
   if (!session) {
     return res.status(404).json({ error: 'Session not found' });
   }
@@ -1504,7 +1499,7 @@ app.post('/api/sessions/transfer', (req, res) => {
 // POST save clinical notes and tags
 app.post('/api/sessions/notes', (req, res) => {
   const { sessionId, clinicalNotes, tags, riskLevel, diagnosticImpressions } = req.body;
-  const session = sessions.get(sessionId);
+  const session = findSessionById(sessionId);
   if (!session) {
     return res.status(404).json({ error: 'Session not found' });
   }
@@ -1521,7 +1516,7 @@ app.post('/api/sessions/notes', (req, res) => {
 // POST close case
 app.post('/api/sessions/close', (req, res) => {
   const { sessionId, resolutionNotes } = req.body;
-  const session = sessions.get(sessionId);
+  const session = findSessionById(sessionId);
   if (!session) {
     return res.status(404).json({ error: 'Session not found' });
   }
@@ -1698,144 +1693,6 @@ Responde en formato JSON válido.`;
       source: 'fallback'
     });
   }
-});
-
-// POST simulate realistic scenarios
-app.post('/api/simulate/scenario', (req, res) => {
-  const { scenarioType } = req.body;
-  const now = Date.now();
-  const phone = `whatsapp:+5255${Math.floor(10000000 + Math.random() * 90000000)}`;
-
-  let newSession: PatientSession;
-
-  if (scenarioType === 'CRISIS') {
-    newSession = {
-      id: phone,
-      phoneNumber: phone.replace('whatsapp:', ''),
-      userName: 'Lucía Valenzuela',
-      state: 'CRISIS_ALERT',
-      riskLevel: 'CRISIS',
-      primaryEmotion: 'Desesperanza Extrema y Angustia Aguda',
-      triageSummary: 'Detectadas frases de ideación de escape inminente. Requiere contención y supervisión inmediata.',
-      startedAt: now,
-      lastActivityAt: now,
-      clinicalNotes: 'Caso de emergencia disparado por triage automático.',
-      diagnosticImpressions: ['Episodio Depresivo Mayor con Riesgo', 'Crisis Existencial Aguda'],
-      tags: ['Código Rojo', 'Ideación', 'Emergencia'],
-      sentimentScore: -0.92,
-      messages: [
-        {
-          id: `msg-1-${now}`,
-          sender: 'bot',
-          text: '¡Hola! Te damos la bienvenida a MindBridge. ¿Cómo te gustaría que te llame?',
-          timestamp: now - 30000,
-        },
-        {
-          id: `msg-2-${now}`,
-          sender: 'user',
-          text: 'Lucía',
-          timestamp: now - 25000,
-        },
-        {
-          id: `msg-3-${now}`,
-          sender: 'user',
-          text: 'Ya no puedo más con el dolor, siento que todos estarían mejor si no estuviera aquí y no tengo fuerzas para seguir viviendo.',
-          timestamp: now,
-          isCrisisTrigger: true,
-        },
-        {
-          id: `msg-4-${now}`,
-          sender: 'bot',
-          text: getCrisisResponseMessage('Lucía'),
-          timestamp: now + 500,
-          isCrisisTrigger: true,
-        }
-      ]
-    };
-  } else if (scenarioType === 'PANIC') {
-    newSession = {
-      id: phone,
-      phoneNumber: phone.replace('whatsapp:', ''),
-      userName: 'Daniel O.',
-      state: 'WAITING_PSYCHOLOGIST',
-      riskLevel: 'ALTO',
-      primaryEmotion: 'Crisis de Pánico y Disnea Somática',
-      triageSummary: 'Sensación de asfixia y taquicardia súbita en el metro. Solicita contacto con psicólogo humano.',
-      startedAt: now - 1000 * 60 * 5,
-      lastActivityAt: now,
-      clinicalNotes: 'Paciente en lugar público con sintomatología somática de pánico.',
-      diagnosticImpressions: ['Crisis de Pánico Agudo', 'Agorafobia reactiva'],
-      tags: ['Ataque de Pánico', 'Taquicardia', 'Triage Alto'],
-      sentimentScore: -0.75,
-      messages: [
-        {
-          id: `p-1-${now}`,
-          sender: 'bot',
-          text: 'Hola Daniel, ¿cómo podemos apoyarte hoy?',
-          timestamp: now - 1000 * 60 * 5,
-        },
-        {
-          id: `p-2-${now}`,
-          sender: 'user',
-          text: 'Por favor ayúdenme, se me duermen los brazos y siento que me desmayo, ¿hay algún psicólogo libre?',
-          timestamp: now,
-        },
-        {
-          id: `p-3-${now}`,
-          sender: 'bot',
-          text: 'Daniel, tu solicitud ha sido enviada a nuestra guardia de psicólogos. Recuerda: las sensaciones de pánico son intensas pero temporales y no van a lastimarte. Prueba fijar tu mirada en 3 objetos a tu alrededor mientras el terapeuta ingresa.',
-          timestamp: now + 500,
-        }
-      ]
-    };
-  } else {
-    // Real patient requesting psychologist for severe anxiety / insomnia
-    newSession = {
-      id: phone,
-      phoneNumber: phone.replace('whatsapp:', ''),
-      userName: 'Camila Ríos',
-      state: 'WAITING_PSYCHOLOGIST',
-      riskLevel: 'MODERADO',
-      primaryEmotion: 'Ansiedad Anticipatoria y Dificultad para Dormir',
-      triageSummary: 'Paciente real con insomnio severo y rumiación ansiosa. Solicita consulta con psicólogo especialista.',
-      startedAt: now - 1000 * 60 * 20,
-      lastActivityAt: now,
-      clinicalNotes: 'Paciente real esperando en guardia. Requiere evaluación de ansiedad y pautas de higiene de sueño.',
-      diagnosticImpressions: ['Rumiación Ansiosa', 'Insomnio Reactivo'],
-      tags: ['Paciente Real', 'Ansiedad', 'Insomnio', 'Estudiante'],
-      sentimentScore: -0.35,
-      messages: [
-        {
-          id: `c-1-${now}`,
-          sender: 'bot',
-          text: '🌿 Hola Camila, bienvenida al servicio de Guardia Psicológica de MindBridge.',
-          timestamp: now - 1000 * 60 * 20,
-        },
-        {
-          id: `c-2-${now}`,
-          sender: 'user',
-          text: 'Hola, llevo horas dando vueltas en la cama sobrepensando, me siento muy sola con esto y quisiera hablar con un psicólogo.',
-          timestamp: now - 1000 * 60 * 10,
-        },
-        {
-          id: `c-3-${now}`,
-          sender: 'bot',
-          text: 'Camila, tu caso ha sido registrado en la bandeja de guardia. Uno de nuestros terapeutas se conectará contigo para acompañarte.',
-          timestamp: now - 1000 * 60 * 9,
-        }
-      ]
-    };
-  }
-
-  sessions.set(newSession.id, newSession);
-  res.json({ success: true, session: newSession });
-});
-
-// Reset demo state
-app.post('/api/simulate/reset', (req, res) => {
-  sessions.clear();
-  seedInitialSessions();
-  res.json({ success: true, message: 'Sessions reset to initial clinical sample' });
 });
 
 // Status & diagnostics

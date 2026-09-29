@@ -109,6 +109,21 @@ export async function sendPsychologistMessage(
   return data.session;
 }
 
+export async function sendDirectTwilioWhatsApp(params: {
+  phoneNumber: string;
+  sessionId?: string;
+  text: string;
+  psychologistName: string;
+}): Promise<{ success: boolean; twilioSid?: string; error?: string; session?: PatientSession; message?: any }> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/twilio/send-direct`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  return res.json();
+}
+
 export async function transferSession(
   sessionId: string,
   target: 'AI_MODE' | 'WAITING_PSYCHOLOGIST'
@@ -159,22 +174,20 @@ export async function closeSession(
   return data.session;
 }
 
-export async function simulateScenario(scenarioType: 'CRISIS' | 'PANIC' | 'ANXIETY'): Promise<PatientSession> {
+export async function deleteSession(sessionId: string): Promise<void> {
   const base = getApiBaseUrl();
-  const res = await fetch(`${base}/api/simulate/scenario`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ scenarioType }),
+  const res = await fetch(`${base}/api/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'DELETE',
   });
-  if (!res.ok) throw new Error('Failed to simulate scenario');
-  const data = await res.json();
-  return data.session;
+  if (!res.ok) throw new Error('Failed to delete session');
 }
 
-export async function resetSimulation(): Promise<void> {
+export async function clearAllSessions(): Promise<void> {
   const base = getApiBaseUrl();
-  const res = await fetch(`${base}/api/simulate/reset`, { method: 'POST' });
-  if (!res.ok) throw new Error('Failed to reset simulation');
+  const res = await fetch(`${base}/api/sessions/clear-all`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error('Failed to clear all sessions');
 }
 
 export async function checkHealth(): Promise<{ status: string; geminiConfigured: boolean; sessionsCount: number }> {

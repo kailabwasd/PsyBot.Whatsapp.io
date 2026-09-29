@@ -22,7 +22,9 @@ import {
   sendPsychologistMessage, 
   transferSession, 
   saveClinicalNotes, 
-  closeSession
+  closeSession,
+  deleteSession,
+  clearAllSessions
 } from './services/api.ts';
 import { Header } from './components/Header.tsx';
 import { GeneralQueue } from './components/GeneralQueue.tsx';
@@ -44,7 +46,9 @@ import {
   syncSessionToFirestoreClinicalRecord, 
   saveActiveSessionToFirestore, 
   getActiveSessionsFromFirestore, 
-  subscribeToActiveSessions 
+  subscribeToActiveSessions,
+  deleteActiveSessionFromFirestore,
+  deleteAllActiveSessionsFromFirestore
 } from './lib/clinicalRecordsService.ts';
 import { AppRoute, parseCurrentRoute, navigateTo, normalizeRoute } from './lib/router.ts';
 import { applyAccessibilitySettings, getStoredAccessibilitySettings } from './lib/accessibility.ts';
@@ -162,6 +166,30 @@ export default function App() {
   const [toasts, setToasts] = useState<NotificationPayload[]>([]);
   const previousSessionsMapRef = useRef<Map<string, { state: string; messagesCount: number; riskLevel: string }>>(new Map());
   const isFirstLoadRef = useRef<boolean>(true);
+  const notifiedCrisisSessionsRef = useRef<Set<string>>(
+    (() => {
+      try {
+        const raw = localStorage.getItem('psybot_notified_crisis_ids');
+        return raw ? new Set<string>(JSON.parse(raw)) : new Set<string>();
+      } catch {
+        return new Set<string>();
+      }
+    })()
+  );
+
+  const markCrisisNotified = (sessionId: string, phoneNumber?: string) => {
+    if (!sessionId) return;
+    notifiedCrisisSessionsRef.current.add(sessionId);
+    if (phoneNumber) {
+      notifiedCrisisSessionsRef.current.add(phoneNumber);
+    }
+    try {
+      localStorage.setItem(
+        'psybot_notified_crisis_ids',
+        JSON.stringify(Array.from(notifiedCrisisSessionsRef.current))
+      );
+    } catch (e) {}
+  };
 
   const toggleSound = () => {
     setSoundEnabled((prev) => {
@@ -498,55 +526,49 @@ export default function App() {
 
       list.forEach((s) => {
         const prev = prevMap.get(s.id);
+        const isClaimedOrHuman = s.state === 'HUMAN_MODE' || Boolean(s.assignedPsychologistId) || s.state === 'RESOLVED';
 
-        // 1. New patient registered in triage queue or crisis alert
-        if (!prev) {
-          if (s.state === 'CRISIS_ALERT' || s.riskLevel === 'CRISIS') {
-            const notif: NotificationPayload = {
-              title: `🚨 ¡Alerta Roja: ${s.userName}!`,
-              body: s.triageSummary || 'Paciente con riesgo crítico detectado en guardia.',
-              type: 'CRISIS_ALERT',
-              sessionId: s.id,
-              patientName: s.userName,
-              timestamp: Date.now(),
-            };
-            notifyPsychologist(notif, soundEnabled, () => {
-              setActiveTab('QUEUE');
-              setPreviewModalSession(s);
-            });
-            setToasts((t) => [notif, ...t.slice(0, 3)]);
-          } else if (s.state === 'WAITING_PSYCHOLOGIST') {
-            const notif: NotificationPayload = {
-              title: `📥 Nuevo Paciente en Guardia: ${s.userName}`,
-              body: s.triageSummary || 'Paciente solicita atención con psicólogo humano.',
-              type: 'NEW_PATIENT',
-              sessionId: s.id,
-              patientName: s.userName,
-              timestamp: Date.now(),
-            };
-            notifyPsychologist(notif, soundEnabled, () => {
-              setActiveTab('QUEUE');
-              setPreviewModalSession(s);
-            });
-            setToasts((t) => [notif, ...t.slice(0, 3)]);
-          }
-        } else {
-          // 2. Existing session transitioned to crisis or waiting
-          if (prev.state !== 'CRISIS_ALERT' && (s.state === 'CRISIS_ALERT' || s.riskLevel === 'CRISIS')) {
-            const notif: NotificationPayload = {
-              title: `🚨 ¡Alerta Crítica: ${s.userName}!`,
-              body: s.triageSummary || 'El caso ha sido reclasificado a riesgo crítico.',
-              type: 'CRISIS_ALERT',
-              sessionId: s.id,
-              patientName: s.userName,
-              timestamp: Date.now(),
-            };
-            notifyPsychologist(notif, soundEnabled, () => {
-              setActiveTab('QUEUE');
-              setPreviewModalSession(s);
-            });
-            setToasts((t) => [notif, ...t.slice(0, 3)]);
-          } else if (prev.state !== 'WAITING_PSYCHOLOGIST' && s.state === 'WAITING_PSYCHOLOGIST') {
+        // If the case is claimed or already in active human mode/resolved, silence crisis notifications permanently
+        if (isClaimedOrHuman) {
+          markCrisisNotified(s.id, s.phoneNumber);
+        }
+
+        const isCrisis = (s.state === 'CRISIS_ALERT' || s.riskLevel === 'CRISIS') && !isClaimedOrHuman;
+        const alreadyNotifiedCrisis = notifiedCrisisSessionsRef.current.has(s.id) || (s.phoneNumber ? notifiedCrisisSessionsRef.current.has(s.phoneNumber) : false);
+
+        // 1. Single Crisis Alert Notification (Fired strictly once per crisis incident)
+        if (isCrisis && !alreadyNotifiedCrisis) {
+          markCrisisNotified(s.id, s.phoneNumber);
+          const notif: NotificationPayload = {
+            title: `🚨 ¡Alerta Roja: ${s.userName}!`,
+            body: s.triageSummary || 'Paciente con riesgo crítico detectado en guardia.',
+            type: 'CRISIS_ALERT',
+            sessionId: s.id,
+            patientName: s.userName,
+            timestamp: Date.now(),
+          };
+          notifyPsychologist(notif, soundEnabled, () => {
+            setActiveTab('QUEUE');
+            setPreviewModalSession(s);
+          });
+          setToasts((t) => [notif, ...t.slice(0, 3)]);
+        } else if (!prev && s.state === 'WAITING_PSYCHOLOGIST' && !isClaimedOrHuman) {
+          // 2. New standard patient registered in triage queue
+          const notif: NotificationPayload = {
+            title: `📥 Nuevo Paciente en Guardia: ${s.userName}`,
+            body: s.triageSummary || 'Paciente solicita atención con psicólogo humano.',
+            type: 'NEW_PATIENT',
+            sessionId: s.id,
+            patientName: s.userName,
+            timestamp: Date.now(),
+          };
+          notifyPsychologist(notif, soundEnabled, () => {
+            setActiveTab('QUEUE');
+            setPreviewModalSession(s);
+          });
+          setToasts((t) => [notif, ...t.slice(0, 3)]);
+        } else if (prev) {
+          if (prev.state !== 'WAITING_PSYCHOLOGIST' && s.state === 'WAITING_PSYCHOLOGIST' && !isClaimedOrHuman) {
             const notif: NotificationPayload = {
               title: `📥 Paciente en Cola: ${s.userName}`,
               body: s.triageSummary || 'Paciente derivado a la bandeja de guardia.',
@@ -638,6 +660,7 @@ export default function App() {
   // Handlers
   const handleClaim = async (session: PatientSession) => {
     if (!currentUser) return;
+    markCrisisNotified(session.id, session.phoneNumber);
     try {
       const updated = await claimSession(session.id, currentUser.uid, currentUser.displayName);
       await saveActiveSessionToFirestore(updated);
@@ -698,14 +721,56 @@ export default function App() {
 
   const handleCloseSession = async (sessionId: string, resolutionNotes: string) => {
     try {
+      markCrisisNotified(sessionId);
       const updated = await closeSession(sessionId, resolutionNotes);
-      await saveActiveSessionToFirestore(updated);
       await syncSessionToFirestoreClinicalRecord(updated);
-      setSessions((prev) => prev.map((s) => (s.id === sessionId ? updated : s)));
-      const next = sessions.find((s) => s.id !== sessionId && s.state === 'HUMAN_MODE');
-      setActiveSessionId(next ? next.id : null);
+      await deleteActiveSessionFromFirestore(sessionId);
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      
+      setActiveSessionId((prevId) => {
+        if (prevId === sessionId) {
+          const remaining = sessions.filter((s) => s.id !== sessionId && s.state === 'HUMAN_MODE');
+          return remaining.length > 0 ? remaining[0].id : null;
+        }
+        return prevId;
+      });
+
+      const notif: NotificationPayload = {
+        title: '✅ Caso Concluido y Archivado',
+        body: `La atención de ${updated.userName} ha sido archivada en Expedientes Clínicos.`,
+        type: 'NEW_MESSAGE',
+        timestamp: Date.now(),
+      };
+      setToasts((prev) => [notif, ...prev.slice(0, 3)]);
     } catch (e) {
       console.error('Error closing session:', e);
+    }
+  };
+
+  const handleDeleteSession = async (sessionId: string) => {
+    try {
+      await deleteSession(sessionId);
+      await deleteActiveSessionFromFirestore(sessionId);
+      setSessions((prev) => prev.filter(s => s.id !== sessionId && s.phoneNumber !== sessionId));
+      if (activeSessionId === sessionId) {
+        setActiveSessionId(null);
+        localStorage.removeItem('psybot_active_session_id');
+      }
+    } catch (e) {
+      console.error('Error deleting session:', e);
+    }
+  };
+
+  const handleClearAllSessions = async () => {
+    try {
+      await clearAllSessions();
+      await deleteAllActiveSessionsFromFirestore();
+      setSessions([]);
+      setActiveSessionId(null);
+      localStorage.removeItem('psybot_active_session_id');
+      localStorage.removeItem('psybot_active_sessions_cache');
+    } catch (e) {
+      console.error('Error clearing all sessions:', e);
     }
   };
 
@@ -1180,7 +1245,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Settings Modal (Profile, Admins, Theme, Secrets) */}
+      {/* Settings Modal (Profile, Admins, Theme, Secrets, Patient Management) */}
       {isSettingsOpen && (
         <SettingsModal
           currentUser={currentUser}
@@ -1213,6 +1278,9 @@ export default function App() {
           }}
           themeMode={themeMode}
           onThemeChange={(mode) => setThemeMode(mode)}
+          sessions={sessions}
+          onDeleteSession={handleDeleteSession}
+          onClearAllSessions={handleClearAllSessions}
         />
       )}
 

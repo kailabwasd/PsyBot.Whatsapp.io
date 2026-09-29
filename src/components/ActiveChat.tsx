@@ -21,9 +21,12 @@ import {
   Meh,
   Frown,
   BrainCircuit,
-  Info
+  Info,
+  Archive,
+  MessageSquare
 } from 'lucide-react';
 import type { PatientSession, PsychologistProfile, RiskLevel } from '../types/index.ts';
+import { sendDirectTwilioWhatsApp } from '../services/api.ts';
 
 interface PatientSentiment {
   sentimentCategory: 'feliz' | 'neutra' | 'preocupada';
@@ -46,6 +49,13 @@ interface ActiveChatProps {
   onOpenReportModal: (session: PatientSession) => void;
   onNavigateToRecord?: (recordId: string) => void;
 }
+
+const RESOLUTION_TEMPLATES = [
+  'Paciente estabilizado de crisis de angustia tras intervención con respiración diafragmática. Refiere disminución de síntomas y se acuerda seguimiento.',
+  'Plan de seguridad y contención acordado con red de apoyo familiar. Se suministraron líneas 106 y 192 de atención de urgencias.',
+  'Atención clínica inicial completada con éxito. Paciente orientado hacia consulta externa de psicología de la Subred Norte.',
+  'Caso remitido a valoración médica prioritaria con acompañamiento familiar.'
+];
 
 const THERAPEUTIC_PRESETS = [
   {
@@ -96,6 +106,8 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
 }) => {
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [lastTwilioSid, setLastTwilioSid] = useState<string | null>(null);
   const [localNotes, setLocalNotes] = useState('');
   const [resolutionPromptOpen, setResolutionPromptOpen] = useState(false);
   const [resolutionNotes, setResolutionNotes] = useState('');
@@ -214,8 +226,14 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
     const text = inputText.trim();
     setInputText('');
     setIsSending(true);
+    setSendError(null);
+
     try {
+      // Outbound dispatch via Twilio WhatsApp connected to the patient's phone + Firestore sync
       await onSendMessage(currentSession.id, text);
+    } catch (err: any) {
+      console.error('Error sending WhatsApp message:', err);
+      setSendError(err?.message || 'Error al despachar el mensaje por Twilio WhatsApp.');
     } finally {
       setIsSending(false);
     }
@@ -248,7 +266,8 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
 
   const handleCloseCaseSubmit = async () => {
     if (!currentSession) return;
-    await onCloseSession(currentSession.id, resolutionNotes);
+    const notesToSave = resolutionNotes.trim() || 'Atención completada y paciente dado de alta de guardia.';
+    await onCloseSession(currentSession.id, notesToSave);
     setResolutionPromptOpen(false);
     setResolutionNotes('');
   };
@@ -569,26 +588,67 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
           <div ref={messagesEndRef} />
         </div>
 
+        {/* Twilio Outbound Delivery Alerts / Notice */}
+        {sendError && (
+          <div className="px-4 py-2 bg-red-950/90 border-t border-red-500/50 text-xs text-red-200 flex items-center justify-between animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+              <span><strong>Aviso Twilio:</strong> {sendError}</span>
+            </div>
+            <button
+              onClick={() => setSendError(null)}
+              className="text-xs text-red-300 hover:text-white px-2 py-0.5 rounded bg-red-900/40"
+            >
+              Cerrar
+            </button>
+          </div>
+        )}
+
         {/* Input Area */}
-        <form
-          onSubmit={handleSend}
-          className="p-3 bg-slate-850 border-t border-slate-800 flex items-center gap-2"
-        >
-          <input
-            type="text"
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            placeholder={`Responder a ${currentSession.userName} en WhatsApp...`}
-            className="flex-1 bg-slate-900 text-sm text-white placeholder-slate-500 px-4 py-2.5 rounded-xl border border-slate-700 focus:outline-none focus:border-teal-500 transition"
-          />
-          <button
-            type="submit"
-            disabled={!inputText.trim() || isSending}
-            className="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 text-white transition shadow-lg shadow-emerald-600/20"
+        <div className="p-3 bg-slate-850 border-t border-slate-800 space-y-2">
+          <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
+            <span className="flex items-center gap-1.5 font-mono text-emerald-400">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>Twilio WhatsApp Directo: {currentSession.phoneNumber || currentSession.id}</span>
+            </span>
+            {lastTwilioSid && (
+              <span className="text-[10px] text-teal-300/80 font-mono truncate max-w-[200px]" title={`Twilio Message SID: ${lastTwilioSid}`}>
+                SID: {lastTwilioSid}
+              </span>
+            )}
+          </div>
+
+          <form
+            onSubmit={handleSend}
+            className="flex items-center gap-2"
           >
-            <Send className="w-4 h-4" />
-          </button>
-        </form>
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder={`Escribe un mensaje para enviar directamente al WhatsApp de ${currentSession.userName}...`}
+              className="flex-1 bg-slate-900 text-sm text-white placeholder-slate-500 px-4 py-2.5 rounded-xl border border-slate-700 focus:outline-none focus:border-teal-500 transition"
+            />
+            <button
+              type="submit"
+              disabled={!inputText.trim() || isSending}
+              className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 text-white text-xs font-bold transition shadow-lg shadow-emerald-600/20 flex items-center gap-1.5 cursor-pointer shrink-0"
+              title="Enviar directamente al WhatsApp del paciente mediante Twilio REST API"
+            >
+              {isSending ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Enviando...</span>
+                </>
+              ) : (
+                <>
+                  <Send className="w-4 h-4" />
+                  <span>Enviar WhatsApp</span>
+                </>
+              )}
+            </button>
+          </form>
+        </div>
 
       </div>
 
@@ -623,6 +683,16 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Action Button: Concluir / Cerrar Caso */}
+        <button
+          type="button"
+          onClick={() => setResolutionPromptOpen(true)}
+          className="w-full py-2.5 px-3 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer shadow"
+        >
+          <CheckCircle className="w-4 h-4 text-emerald-400" />
+          <span>Cerrar y Archivar Caso</span>
+        </button>
 
         {/* Risk Level Triage Selector */}
         <div className="space-y-1.5">
@@ -705,9 +775,9 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
       {/* Resolution & Discharge Modal */}
       {resolutionPromptOpen && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-150 text-slate-100">
             <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/40">
                 <CheckCircle className="w-6 h-6" />
               </div>
               <div>
@@ -715,39 +785,59 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
                   Concluir y Archivar Sesión
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Paciente: {currentSession.userName} ({currentSession.phoneNumber})
+                  Paciente: <strong className="text-white">{currentSession.userName}</strong> ({currentSession.phoneNumber})
                 </p>
               </div>
             </div>
 
-            <p className="text-xs text-slate-300 leading-relaxed">
-              Al concluir, se enviará un mensaje de cierre respetuoso al paciente en WhatsApp y el caso quedará registrado en el historial clínico.
+            <p className="text-xs text-slate-300 leading-relaxed bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+              Al confirmar el cierre, la sesión se marcará como resuelta, se notificará al paciente en WhatsApp y los datos clínicos se sincronizarán permanentemente en Firestore.
             </p>
 
-            <div>
-              <label className="text-xs font-semibold text-slate-300 block mb-1">
+            {/* Quick Resolution Presets */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                <Sparkles className="w-3 h-3 text-teal-400" /> Plantillas Rápidas de Alta:
+              </label>
+              <div className="space-y-1">
+                {RESOLUTION_TEMPLATES.map((tmpl, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setResolutionNotes(tmpl)}
+                    className="w-full text-left p-2 rounded-lg bg-slate-950 hover:bg-teal-950/40 border border-slate-800 hover:border-teal-500/40 text-[11px] text-slate-300 hover:text-teal-200 transition line-clamp-1"
+                  >
+                    • {tmpl}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-300 block">
                 Resumen de Resolución e Indicaciones Finales:
               </label>
               <textarea
                 value={resolutionNotes}
                 onChange={(e) => setResolutionNotes(e.target.value)}
                 placeholder="Ej: Paciente estabilizado de ataque de pánico tras técnica diafragmática. Se proporcionaron líneas de apoyo y se acordó consulta presencial."
-                className="w-full bg-slate-950 text-xs text-white p-3 rounded-xl border border-slate-700 focus:outline-none focus:border-teal-500 h-24 resize-none"
+                className="w-full bg-slate-950 text-xs text-white p-3 rounded-xl border border-slate-700 focus:outline-none focus:border-teal-500 h-24 resize-none leading-relaxed"
               />
             </div>
 
             <div className="flex items-center justify-end gap-3 pt-2">
               <button
                 onClick={() => setResolutionPromptOpen(false)}
-                className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-white bg-slate-800 transition"
+                className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-white bg-slate-800 transition cursor-pointer"
               >
                 Cancelar
               </button>
               <button
                 onClick={handleCloseCaseSubmit}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition shadow-lg shadow-emerald-600/20"
+                className="px-5 py-2.5 rounded-xl text-xs font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 transition shadow-lg shadow-emerald-500/20 cursor-pointer flex items-center gap-2"
               >
-                Confirmar Cierre de Caso
+                <CheckCircle className="w-4 h-4" />
+                <span>Confirmar Cierre de Caso</span>
               </button>
             </div>
           </div>
