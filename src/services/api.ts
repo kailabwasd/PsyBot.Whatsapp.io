@@ -449,3 +449,40 @@ export async function verifyTwilioCredentials(
   return res.json();
 }
 
+export interface AdminNotificationSettings {
+  adminPhone: string;
+  enablePeriodicUpdates: boolean;
+  periodicIntervalMinutes: number;
+  enableErrorAlerts: boolean;
+  lastReportTimestamp?: number;
+}
+
+export async function fetchAdminNotificationConfig(): Promise<AdminNotificationSettings> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/admin/notifications/config`);
+  if (!res.ok) throw new Error('Failed to fetch admin notifications config');
+  return res.json();
+}
+
+export async function updateAdminNotificationConfig(
+  config: Partial<AdminNotificationSettings>
+): Promise<{ success: boolean; message: string; config: AdminNotificationSettings }> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/admin/notifications/config`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  if (!res.ok) throw new Error('Failed to update admin notifications config');
+  return res.json();
+}
+
+export async function triggerAdminTestReport(): Promise<{ success: boolean; message?: string }> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/admin/notifications/test-report`, {
+    method: 'POST',
+  });
+  return res.json();
+}
+
+

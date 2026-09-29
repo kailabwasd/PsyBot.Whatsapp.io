@@ -42,7 +42,8 @@ import {
   Send,
   Terminal,
   HelpCircle,
-  Activity
+  Activity,
+  Radio
 } from 'lucide-react';
 import type { PsychologistAuthUser, PsychologistPermissions, PatientSession, SystemErrorLog } from '../types/index.ts';
 import { savePsychologistProfile } from '../lib/firebase.ts';
@@ -53,7 +54,11 @@ import {
   fetchTwilioConfig, 
   updateTwilioConfig, 
   testTwilioConnection,
-  verifyTwilioCredentials
+  verifyTwilioCredentials,
+  fetchAdminNotificationConfig,
+  updateAdminNotificationConfig,
+  triggerAdminTestReport,
+  AdminNotificationSettings
 } from '../services/api.ts';
 
 interface SettingsModalProps {
@@ -151,15 +156,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     advice?: string;
   } | null>(null);
 
+  // Admin WhatsApp Automated Updates & Error Alerts State
+  const [adminNotifyPhone, setAdminNotifyPhone] = useState('+573107956907');
+  const [enablePeriodicUpdates, setEnablePeriodicUpdates] = useState(true);
+  const [enableErrorAlerts, setEnableErrorAlerts] = useState(true);
+  const [lastReportTimestamp, setLastReportTimestamp] = useState<number | undefined>(undefined);
+  const [isSavingNotifyConfig, setIsSavingNotifyConfig] = useState(false);
+  const [isSendingTestReport, setIsSendingTestReport] = useState(false);
+  const [notifyNotice, setNotifyNotice] = useState<string | null>(null);
+  const [testReportResult, setTestReportResult] = useState<{ success?: boolean; message?: string } | null>(null);
+
   const isOwner = currentUser.email === 'kailabwasd@gmail.com' || currentUser.isAdmin;
 
   // Load error logs & Twilio config on mount and when tab changes to errorlogs
   const loadErrorLogsAndTwilioConfig = async () => {
     setIsLoadingErrorLogs(true);
     try {
-      const [logs, config] = await Promise.all([
+      const [logs, config, notifyConfig] = await Promise.all([
         fetchSystemErrorLogs(),
         fetchTwilioConfig().catch(() => null),
+        fetchAdminNotificationConfig().catch(() => null),
       ]);
       setErrorLogs(logs);
       if (config) {
@@ -167,10 +183,64 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         if (!twilioWhatsappNumber) setTwilioWhatsappNumber(config.whatsappNumber || '');
         setHasTwilioAuthToken(config.hasAuthToken || false);
       }
+      if (notifyConfig) {
+        setAdminNotifyPhone(notifyConfig.adminPhone || '+573107956907');
+        setEnablePeriodicUpdates(notifyConfig.enablePeriodicUpdates !== false);
+        setEnableErrorAlerts(notifyConfig.enableErrorAlerts !== false);
+        setLastReportTimestamp(notifyConfig.lastReportTimestamp);
+      }
     } catch (e) {
       console.warn('Error loading logs/twilio config:', e);
     } finally {
       setIsLoadingErrorLogs(false);
+    }
+  };
+
+  const handleSaveNotifyConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingNotifyConfig(true);
+    setNotifyNotice(null);
+    try {
+      const res = await updateAdminNotificationConfig({
+        adminPhone: adminNotifyPhone,
+        enablePeriodicUpdates,
+        enableErrorAlerts,
+      });
+      if (res.success) {
+        setNotifyNotice('Preferencias de alertas y reportes a WhatsApp guardadas exitosamente.');
+        await logAuditEvent({
+          adminEmail: currentUser.email || 'kailabwasd@gmail.com',
+          adminName: currentUser.displayName || 'Administrador',
+          action: 'SYSTEM_CONFIG',
+          severity: 'INFO',
+          category: 'SISTEMA',
+          details: `Configuradas notificaciones administrativas a WhatsApp (${adminNotifyPhone}, Cada 30m: ${enablePeriodicUpdates}, Errores: ${enableErrorAlerts})`,
+        });
+        setTimeout(() => setNotifyNotice(null), 4000);
+      }
+    } catch (err: any) {
+      setNotifyNotice(`Error al guardar: ${err.message || 'Fallo de conexión'}`);
+    } finally {
+      setIsSavingNotifyConfig(false);
+    }
+  };
+
+  const handleTriggerTestReport = async () => {
+    setIsSendingTestReport(true);
+    setTestReportResult(null);
+    try {
+      const res = await triggerAdminTestReport();
+      setTestReportResult(res);
+      setLastReportTimestamp(Date.now());
+      const updatedLogs = await fetchSystemErrorLogs();
+      setErrorLogs(updatedLogs);
+    } catch (err: any) {
+      setTestReportResult({
+        success: false,
+        message: err.message || 'Error al enviar reporte de prueba a WhatsApp',
+      });
+    } finally {
+      setIsSendingTestReport(false);
     }
   };
 
@@ -1562,6 +1632,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <li>Pégalos en el formulario a continuación y presiona <strong className="text-emerald-400">"Guardar Credenciales en Memoria"</strong> para probarlo inmediatamente, o actualiza la variable de entorno <code className="text-amber-300 font-mono">TWILIO_AUTH_TOKEN</code> en Railway.</li>
                   </ol>
                 </div>
+
+                {/* Error 63007 Guide: Channel Not Found */}
+                <div className="bg-slate-950/80 p-3.5 rounded-xl border border-red-500/30 text-xs text-slate-300 space-y-2">
+                  <h5 className="font-bold text-red-300 flex items-center gap-1.5">
+                    <Radio className="w-3.5 h-3.5 text-red-400" /> Pasos para solucionar el Error 63007 ("Could not find a Channel with specified From address"):
+                  </h5>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    Este error indica que tu cuenta de Twilio aún no tiene activo el Sandbox de WhatsApp o que el número remitente no está habilitado como canal de WhatsApp.
+                  </p>
+                  <ol className="list-decimal list-inside space-y-1 text-[11px] text-slate-300 leading-relaxed pl-1">
+                    <li>En tu consola de Twilio, ve al menú lateral izquierdo &rarr; <strong>Messaging</strong> &rarr; <strong>Try it out</strong> &rarr; <strong>Send a WhatsApp message</strong>.</li>
+                    <li>Acepta los términos del Sandbox de WhatsApp para aprovisionar el canal remitente <code className="text-emerald-300 font-mono">+1 415 523 8886</code> en tu cuenta.</li>
+                    <li>Envía desde tu WhatsApp al número <strong>+1 415 523 8886</strong> el mensaje con tu código de activación (ej: <code className="text-amber-300 font-mono font-bold">join &lt;tu-código-sandbox&gt;</code>) para vincular el número del paciente.</li>
+                  </ol>
+                </div>
               </div>
 
               {/* Twilio In-Memory Live Config Form */}
@@ -1742,6 +1827,130 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </div>
                   )}
                 </div>
+              </div>
+
+              {/* AUTOMATED ADMIN WHATSAPP UPDATES & ERROR ALERTS (EVERY 30 MINS) */}
+              <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 border border-emerald-500/40 space-y-4 shadow-lg">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center shrink-0">
+                      <Clock className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                        Actualizaciones Cada 30 Minutos & Alertas de Error por WhatsApp
+                      </h4>
+                      <p className="text-[11px] text-slate-400">
+                        Envío de reportes de guardia y notificación instantánea de fallos a tu número personal.
+                      </p>
+                    </div>
+                  </div>
+
+                  <span className="text-[10px] px-2.5 py-1 rounded-full font-mono font-bold bg-emerald-950 text-emerald-300 border border-emerald-500/40 flex items-center gap-1.5 self-start sm:self-auto">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    Servicio Activo
+                  </span>
+                </div>
+
+                {notifyNotice && (
+                  <div className="p-3 bg-emerald-950/80 border border-emerald-500/50 rounded-xl text-emerald-200 text-xs flex items-center gap-2 animate-in fade-in">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>{notifyNotice}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleSaveNotifyConfig} className="space-y-3 pt-1">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-300 mb-1 flex items-center gap-1.5">
+                      <Phone className="w-3.5 h-3.5 text-emerald-400" />
+                      Número de WhatsApp Administrador para Notificaciones
+                    </label>
+                    <input
+                      type="text"
+                      value={adminNotifyPhone}
+                      onChange={(e) => setAdminNotifyPhone(e.target.value)}
+                      placeholder="+573107956907"
+                      className="w-full bg-slate-900 border border-slate-750 focus:border-emerald-400 rounded-xl px-3 py-2 text-xs text-white outline-none font-mono"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <label className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-900/80 border border-slate-800 cursor-pointer hover:border-slate-700 transition">
+                      <input
+                        type="checkbox"
+                        checked={enablePeriodicUpdates}
+                        onChange={(e) => setEnablePeriodicUpdates(e.target.checked)}
+                        className="mt-0.5 rounded text-emerald-500 focus:ring-emerald-400 bg-slate-950 border-slate-700"
+                      />
+                      <div className="text-xs">
+                        <span className="font-bold text-white block">Actualizaciones de Estado cada 30 min</span>
+                        <span className="text-[11px] text-slate-400">
+                          Recibe conteo de pacientes en espera, crisis activas, guardias y salud de la plataforma.
+                        </span>
+                      </div>
+                    </label>
+
+                    <label className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-900/80 border border-slate-800 cursor-pointer hover:border-slate-700 transition">
+                      <input
+                        type="checkbox"
+                        checked={enableErrorAlerts}
+                        onChange={(e) => setEnableErrorAlerts(e.target.checked)}
+                        className="mt-0.5 rounded text-red-500 focus:ring-red-400 bg-slate-950 border-slate-700"
+                      />
+                      <div className="text-xs">
+                        <span className="font-bold text-white block">Alertas Inmediatas de Errores</span>
+                        <span className="text-[11px] text-slate-400">
+                          Notifica de inmediato si ocurre un fallo de Twilio (401, 63007), caída de red o de API.
+                        </span>
+                      </div>
+                    </label>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
+                    <div className="text-[11px] text-slate-400 font-mono">
+                      {lastReportTimestamp && (
+                        <span>Último reporte: {new Date(lastReportTimestamp).toLocaleTimeString('es-CO')}</span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleTriggerTestReport}
+                        disabled={isSendingTestReport}
+                        className="px-3.5 py-2 rounded-xl bg-slate-850 hover:bg-slate-800 text-emerald-300 border border-emerald-500/40 font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer shadow disabled:opacity-50"
+                        title="Envía el reporte de 30 minutos en este instante a tu WhatsApp para verificar"
+                      >
+                        {isSendingTestReport ? <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-400" /> : <Send className="w-3.5 h-3.5 text-emerald-400" />}
+                        <span>Enviar Reporte Ahora (Prueba)</span>
+                      </button>
+
+                      <button
+                        type="submit"
+                        disabled={isSavingNotifyConfig}
+                        className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow disabled:opacity-50"
+                      >
+                        {isSavingNotifyConfig ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                        <span>Guardar Preferencias</span>
+                      </button>
+                    </div>
+                  </div>
+                </form>
+
+                {testReportResult && (
+                  <div className={`p-3 rounded-xl border text-xs flex items-center gap-2 animate-in fade-in ${
+                    testReportResult.success
+                      ? 'bg-emerald-950/70 border-emerald-500/50 text-emerald-200'
+                      : 'bg-red-950/80 border-red-500/50 text-red-200'
+                  }`}>
+                    {testReportResult.success ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                    )}
+                    <span>{testReportResult.message}</span>
+                  </div>
+                )}
               </div>
 
               {/* Real-time System Error Logs Feed */}

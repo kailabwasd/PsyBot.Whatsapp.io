@@ -478,6 +478,8 @@ function loadErrorLogsFromFile() {
 }
 loadErrorLogsFromFile();
 
+let notifyAdminErrorAlert: ((newLog: SystemErrorLog) => Promise<void>) | null = null;
+
 export function recordSystemError(entry: Omit<SystemErrorLog, 'id' | 'timestamp'>): SystemErrorLog {
   const newLog: SystemErrorLog = {
     id: `err-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -489,6 +491,15 @@ export function recordSystemError(entry: Omit<SystemErrorLog, 'id' | 'timestamp'
     systemErrorLogs.pop();
   }
   saveErrorLogsToFile();
+
+  if (typeof notifyAdminErrorAlert === 'function') {
+    setTimeout(() => {
+      if (notifyAdminErrorAlert) {
+        notifyAdminErrorAlert(newLog).catch(() => {});
+      }
+    }, 50);
+  }
+
   return newLog;
 }
 
@@ -532,8 +543,9 @@ async function sendTwilioWhatsAppMessage(
 
   try {
     const authString = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+    const senderFrom = whatsappNumber.startsWith('whatsapp:') ? whatsappNumber : `whatsapp:${whatsappNumber}`;
     const params = new URLSearchParams();
-    params.append('From', whatsappNumber);
+    params.append('From', senderFrom);
     params.append('To', formattedTo);
     params.append('Body', messageBody);
 
@@ -559,6 +571,9 @@ async function sendTwilioWhatsAppMessage(
         if (parsed.code === 20003 || response.status === 401) {
           parsedMessage = 'Twilio Error 20003 (401 Unauthorized): El TWILIO_AUTH_TOKEN configurado en el servidor no coincide con tu consola Twilio o ha expirado.';
           suggestion = 'Copia el Auth Token actual de tu consola de Twilio (https://console.twilio.com) y actualízalo en el panel de Administrador ("Errores & Twilio") o en las variables de entorno de Railway.';
+        } else if (parsed.code === 63007) {
+          parsedMessage = `Twilio Error 63007: Twilio no encontró el canal de WhatsApp para el remitente "${senderFrom}" en la cuenta ${accountSid.substring(0, 8)}...`;
+          suggestion = 'Debes habilitar el Sandbox de WhatsApp en tu consola Twilio: Ve a https://console.twilio.com -> Messaging -> Try it out -> Send a WhatsApp message y acepta los términos para activar el número (+1 415 523 8886) en esta cuenta. Si tienes un número comprado, debe ser registrado y verificado en Meta/Twilio WhatsApp Senders.';
         } else if (parsed.code === 21608) {
           parsedMessage = `Twilio Error 21608: El número ${formattedTo} aún no se ha unido a tu Sandbox de WhatsApp. Envía el comando "join <sandbox>" a ${whatsappNumber}.`;
           suggestion = `Pídele al paciente que envíe el comando de activación del Sandbox de WhatsApp al número ${whatsappNumber}.`;
@@ -605,6 +620,124 @@ async function sendTwilioWhatsAppMessage(
     return { success: false, error: errorMsg };
   }
 }
+
+// ==============================================================================
+// ADMIN NOTIFICATION ENGINE (WhatsApp Updates every 30 mins & Error Alerts)
+// ==============================================================================
+interface AdminNotificationConfig {
+  adminPhone: string;
+  enablePeriodicUpdates: boolean;
+  periodicIntervalMinutes: number;
+  enableErrorAlerts: boolean;
+  lastReportTimestamp?: number;
+}
+
+const ADMIN_NOTIFICATIONS_CONFIG: AdminNotificationConfig = {
+  adminPhone: cleanCredential(process.env.ADMIN_ALERT_PHONE) || 'whatsapp:+573107956907',
+  enablePeriodicUpdates: true,
+  periodicIntervalMinutes: 30,
+  enableErrorAlerts: true,
+  lastReportTimestamp: Date.now(),
+};
+
+let isSendingAdminAlert = false;
+let lastErrorAlertTimestamp = 0;
+
+notifyAdminErrorAlert = async (newLog: SystemErrorLog) => {
+  if (isSendingAdminAlert) return;
+  if (!ADMIN_NOTIFICATIONS_CONFIG.enableErrorAlerts) return;
+  
+  // Debounce to at most 1 alert every 10 seconds to avoid flooding
+  if (Date.now() - lastErrorAlertTimestamp < 10000) return;
+
+  const target = sanitizeWhatsAppNumber(ADMIN_NOTIFICATIONS_CONFIG.adminPhone);
+  if (!target) return;
+
+  // Prevent sending an error alert if the error was caused by the admin phone itself
+  if (newLog.targetPhone === target) return;
+
+  lastErrorAlertTimestamp = Date.now();
+  isSendingAdminAlert = true;
+
+  try {
+    const alertMessage = [
+      `🚨 *[ALERTA DE ERROR - SUBATECH SISTEMA]*`,
+      `⚠️ *Servicio:* ${newLog.service}`,
+      `📌 *Error:* ${newLog.title}`,
+      newLog.errorCode ? `🔢 *Código:* ${newLog.errorCode}` : '',
+      newLog.targetPhone ? `📱 *Destino:* ${newLog.targetPhone}` : '',
+      `📝 *Detalle:* ${newLog.details.substring(0, 250)}`,
+      newLog.suggestion ? `💡 *Sugerencia:* ${newLog.suggestion}` : '',
+      `🕒 *Hora:* ${new Date(newLog.timestamp).toLocaleTimeString('es-CO')}`
+    ].filter(Boolean).join('\n');
+
+    console.log(`[Admin Alert] Dispatching error alert to ${target}: ${newLog.title}`);
+    await sendTwilioWhatsAppMessage(target, alertMessage);
+  } catch (err) {
+    console.warn('[Admin Alert] Failed to dispatch error alert to admin:', err);
+  } finally {
+    isSendingAdminAlert = false;
+  }
+};
+
+async function generateAndSendPeriodicStatusReport(): Promise<{ success: boolean; message?: string }> {
+  if (!ADMIN_NOTIFICATIONS_CONFIG.enablePeriodicUpdates) {
+    return { success: false, message: 'Actualizaciones periódicas deshabilitadas' };
+  }
+  const target = sanitizeWhatsAppNumber(ADMIN_NOTIFICATIONS_CONFIG.adminPhone);
+  if (!target) {
+    return { success: false, message: 'Número de WhatsApp administrador no configurado' };
+  }
+
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', hour12: true });
+  const dateStr = now.toLocaleDateString('es-CO');
+
+  const sessionsList = Array.from(sessions.values());
+  const waiting = sessionsList.filter((s: PatientSession) => s.state === 'WAITING_PSYCHOLOGIST').length;
+  const inCrisis = sessionsList.filter((s: PatientSession) => s.riskLevel === 'CRISIS').length;
+  const humanActive = sessionsList.filter((s: PatientSession) => s.state === 'HUMAN_MODE').length;
+  const aiActive = sessionsList.filter((s: PatientSession) => s.state === 'AI_MODE').length;
+  const total = sessionsList.length;
+
+  const halfHourAgo = Date.now() - 30 * 60 * 1000;
+  const recentErrorsCount = systemErrorLogs.filter(e => e.timestamp >= halfHourAgo).length;
+
+  const report = [
+    `📊 *[SubaTECH Guardia 24/7] Reporte de Estado (Cada 30 min)*`,
+    `🕒 *Fecha/Hora:* ${dateStr}, ${timeStr} (Bogotá)`,
+    ``,
+    `📈 *Estado de Pacientes en Guardia:*`,
+    `• En Espera de Psicólogo: *${waiting}*`,
+    `• En Crisis Prioritaria: *${inCrisis}* ${inCrisis > 0 ? '🚨' : '✅'}`,
+    `• En Atención Humana Activa: *${humanActive}*`,
+    `• Con Supervisor IA Aura: *${aiActive}*`,
+    `• Total Registrados en Turno: *${total}*`,
+    ``,
+    `🛡️ *Salud de la Plataforma:*`,
+    `• Twilio WhatsApp: ${TWILIO_CONFIG.authToken ? 'Configurado' : 'Sin Token'}`,
+    `• Errores en últimos 30 min: *${recentErrorsCount}*`,
+    `• Remitente Twilio: ${TWILIO_CONFIG.whatsappNumber}`,
+    ``,
+    `🔔 _Actualización automatizada configurada para ${ADMIN_NOTIFICATIONS_CONFIG.adminPhone}._`
+  ].join('\n');
+
+  console.log(`[Admin Notification] Sending 30-min periodic report to ${target}...`);
+  ADMIN_NOTIFICATIONS_CONFIG.lastReportTimestamp = Date.now();
+  
+  isSendingAdminAlert = true;
+  try {
+    const res = await sendTwilioWhatsAppMessage(target, report);
+    return { success: res.success, message: res.success ? 'Reporte enviado con éxito' : res.error };
+  } catch (err: any) {
+    return { success: false, message: err?.message || 'Error de despacho' };
+  } finally {
+    isSendingAdminAlert = false;
+  }
+}
+
+// 30-minute interval scheduler for automated WhatsApp updates
+setInterval(generateAndSendPeriodicStatusReport, 30 * 60 * 1000);
 
 // Helper: Check if patient text is requesting a real human psychologist in natural language
 function detectPsychologistRequest(text: string): boolean {
@@ -1521,6 +1654,44 @@ app.post('/api/admin/error-logs/record', (req, res) => {
   res.json({ success: true, log: newLog });
 });
 
+// GET Admin Notification configuration
+app.get('/api/admin/notifications/config', (req, res) => {
+  res.json({
+    adminPhone: ADMIN_NOTIFICATIONS_CONFIG.adminPhone,
+    enablePeriodicUpdates: ADMIN_NOTIFICATIONS_CONFIG.enablePeriodicUpdates,
+    periodicIntervalMinutes: ADMIN_NOTIFICATIONS_CONFIG.periodicIntervalMinutes,
+    enableErrorAlerts: ADMIN_NOTIFICATIONS_CONFIG.enableErrorAlerts,
+    lastReportTimestamp: ADMIN_NOTIFICATIONS_CONFIG.lastReportTimestamp,
+  });
+});
+
+// POST Update Admin Notification configuration
+app.post('/api/admin/notifications/config', (req, res) => {
+  const { adminPhone, enablePeriodicUpdates, enableErrorAlerts } = req.body;
+  if (adminPhone !== undefined) {
+    const cleaned = cleanCredential(adminPhone);
+    const sanitized = sanitizeWhatsAppNumber(cleaned);
+    ADMIN_NOTIFICATIONS_CONFIG.adminPhone = sanitized || cleaned;
+  }
+  if (enablePeriodicUpdates !== undefined) {
+    ADMIN_NOTIFICATIONS_CONFIG.enablePeriodicUpdates = Boolean(enablePeriodicUpdates);
+  }
+  if (enableErrorAlerts !== undefined) {
+    ADMIN_NOTIFICATIONS_CONFIG.enableErrorAlerts = Boolean(enableErrorAlerts);
+  }
+  res.json({
+    success: true,
+    message: 'Configuración de notificaciones administrativas de WhatsApp actualizada.',
+    config: ADMIN_NOTIFICATIONS_CONFIG,
+  });
+});
+
+// POST Trigger immediate test report to admin phone
+app.post('/api/admin/notifications/test-report', async (req, res) => {
+  const result = await generateAndSendPeriodicStatusReport();
+  res.json(result);
+});
+
 // POST Verify Twilio credentials directly with Twilio Account API without sending an SMS
 app.post('/api/twilio/verify-credentials', async (req, res) => {
   const { accountSid, authToken } = req.body;
@@ -1651,8 +1822,10 @@ app.post('/api/twilio/test', async (req, res) => {
       targetPhone: target,
       suggestion: result.errorCode === 20003 
         ? 'El Auth Token en tu servidor no coincide con el de tu consola de Twilio. Revisa tu consola Twilio y actualiza la variable TWILIO_AUTH_TOKEN en Railway.'
+        : result.errorCode === 63007
+        ? 'Twilio no encontró el canal remitente. Ve a Messaging -> Try it out -> Send a WhatsApp message en Twilio Console y activa el Sandbox de WhatsApp en tu cuenta.'
         : result.errorCode === 21608 
-        ? 'El número aún no se ha unido al Sandbox de Twilio. Envía "join limited-burn" por WhatsApp al +1 415 523 8886 primero.' 
+        ? 'El número aún no se ha unido al Sandbox de Twilio. Envía el comando join por WhatsApp al número de Sandbox primero.' 
         : undefined
     });
   }

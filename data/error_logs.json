@@ -1,0 +1,13 @@
+[
+  {
+    "id": "err-1790690041942-9m3a9",
+    "timestamp": 1790690041942,
+    "service": "TWILIO",
+    "title": "Twilio Error 20003: 401 Unauthorized (Auth Token Inválido)",
+    "details": "Twilio Error 20003 (401 Unauthorized): El TWILIO_AUTH_TOKEN configurado en el servidor no coincide con tu consola Twilio o ha expirado.",
+    "errorCode": 20003,
+    "statusCode": 401,
+    "targetPhone": "whatsapp:+573107956907",
+    "suggestion": "Copia el Auth Token actual de tu consola de Twilio (https://console.twilio.com) y actualízalo en el panel de Administrador (\"Errores & Twilio\") o en las variables de entorno de Railway."
+  }
+]

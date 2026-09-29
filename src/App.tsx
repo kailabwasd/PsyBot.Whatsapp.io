@@ -865,174 +865,177 @@ export default function App() {
   return (
     <div className={getThemeClasses()}>
       
-      {/* 1. Global Header (GOV.CO + Alcaldía Mayor de Bogotá D.C.) */}
-      <Header
-        currentUser={currentUser}
-        onEditProfile={() => setIsEditingProfile(true)}
-        onOpenSettings={async () => {
-          const list = await listPsychologistsFromFirestore();
-          setAllPsychologists(list);
-          setIsSettingsOpen(true);
-        }}
-        onOpenAccessibility={() => setIsAccessibilityOpen(true)}
-        waitingCount={waitingCount}
-        crisisCount={crisisCount}
-        activeCount={myActiveCount}
-        onLogout={handleLogout}
-        soundEnabled={soundEnabled}
-        onToggleSound={toggleSound}
-        browserPermission={browserPermission}
-        onRequestPermission={handleRequestBrowserPermission}
-        onTestNotification={handleTestNotification}
-      />
+      {/* 1 & 2. Fixed/Sticky Header and Navigation Suite (Never hidden when scrolling) */}
+      <div className="sticky top-0 z-40 w-full shadow-md">
+        {/* 1. Global Header (GOV.CO + Alcaldía Mayor de Bogotá D.C.) */}
+        <Header
+          currentUser={currentUser}
+          onEditProfile={() => setIsEditingProfile(true)}
+          onOpenSettings={async () => {
+            const list = await listPsychologistsFromFirestore();
+            setAllPsychologists(list);
+            setIsSettingsOpen(true);
+          }}
+          onOpenAccessibility={() => setIsAccessibilityOpen(true)}
+          waitingCount={waitingCount}
+          crisisCount={crisisCount}
+          activeCount={myActiveCount}
+          onLogout={handleLogout}
+          soundEnabled={soundEnabled}
+          onToggleSound={toggleSound}
+          browserPermission={browserPermission}
+          onRequestPermission={handleRequestBrowserPermission}
+          onTestNotification={handleTestNotification}
+        />
 
-      {/* 2. Primary Navigation Tabs (Portal Institucional Bogotá.gov.co) */}
-      <div className="bg-[#0B2545] text-white shadow-md relative group">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative flex items-center">
-          {/* Left scroll navigation arrow */}
-          <button
-            onClick={() => scrollNav('left')}
-            className={`hidden sm:flex shrink-0 mr-2 p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition active:scale-95 z-30 ${
-              !canScrollLeft ? 'opacity-40 cursor-default' : ''
-            }`}
-            title="Desplazar hacia la izquierda"
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </button>
-
-          {/* Navigation Scroll Container with Subtle, Neutral Edge Fade Indicators */}
-          <div className="relative flex-1 min-w-0 flex items-center overflow-hidden">
-            {/* Left Edge Subtle Fade Indicator */}
-            <div
-              className={`absolute left-0 top-0 bottom-0 w-3.5 pointer-events-none z-20 bg-gradient-to-r from-[#0B2545]/60 to-transparent transition-opacity duration-300 ${
-                canScrollLeft ? 'opacity-100' : 'opacity-0'
+        {/* 2. Primary Navigation Tabs (Portal Institucional Bogotá.gov.co) */}
+        <div className="bg-[#0B2545] text-white shadow-md relative group">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative flex items-center">
+            {/* Left scroll navigation arrow */}
+            <button
+              onClick={() => scrollNav('left')}
+              className={`hidden sm:flex shrink-0 mr-2 p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition active:scale-95 z-30 ${
+                !canScrollLeft ? 'opacity-40 cursor-default' : ''
               }`}
-              aria-hidden="true"
-            />
-
-            <nav 
-              ref={navContainerRef as any}
-              onScroll={checkNavScroll}
-              className={`flex-1 flex space-x-1 sm:space-x-2 pt-2 overflow-x-auto nav-scrollbar text-xs sm:text-sm font-semibold scroll-smooth ${
-                canScrollLeft && canScrollRight
-                  ? 'fade-both'
-                  : canScrollLeft
-                  ? 'fade-left'
-                  : canScrollRight
-                  ? 'fade-right'
-                  : ''
-              }`}
+              title="Desplazar hacia la izquierda"
             >
-              
-              {/* Bandeja General */}
-              <button
-                onClick={() => handleNavigate('triage')}
-                className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
-                  activeTab === 'QUEUE'
-                    ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
-                    : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+
+            {/* Navigation Scroll Container with Subtle, Neutral Edge Fade Indicators */}
+            <div className="relative flex-1 min-w-0 flex items-center overflow-hidden">
+              {/* Left Edge Subtle Fade Indicator */}
+              <div
+                className={`absolute left-0 top-0 bottom-0 w-3.5 pointer-events-none z-20 bg-gradient-to-r from-[#0B2545]/60 to-transparent transition-opacity duration-300 ${
+                  canScrollLeft ? 'opacity-100' : 'opacity-0'
+                }`}
+                aria-hidden="true"
+              />
+
+              <nav 
+                ref={navContainerRef as any}
+                onScroll={checkNavScroll}
+                className={`flex-1 flex space-x-1 sm:space-x-2 pt-2 overflow-x-auto nav-scrollbar text-xs sm:text-sm font-semibold scroll-smooth ${
+                  canScrollLeft && canScrollRight
+                    ? 'fade-both'
+                    : canScrollLeft
+                    ? 'fade-left'
+                    : canScrollRight
+                    ? 'fade-right'
+                    : ''
                 }`}
               >
-                <Inbox className="w-4 h-4 text-[#C8102E]" />
-                <span>Guardia Triage Pacientes</span>
-                {waitingCount > 0 && (
-                  <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold font-mono ${
-                    crisisCount > 0 ? 'bg-[#C8102E] text-white animate-pulse' : 'bg-[#FFC800] text-[#0B2545]'
-                  }`}>
-                    {waitingCount}
+                
+                {/* Bandeja General */}
+                <button
+                  onClick={() => handleNavigate('triage')}
+                  className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
+                    activeTab === 'QUEUE'
+                      ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
+                      : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
+                  }`}
+                >
+                  <Inbox className="w-4 h-4 text-[#C8102E]" />
+                  <span>Guardia Triage Pacientes</span>
+                  {waitingCount > 0 && (
+                    <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold font-mono ${
+                      crisisCount > 0 ? 'bg-[#C8102E] text-white animate-pulse' : 'bg-[#FFC800] text-[#0B2545]'
+                    }`}>
+                      {waitingCount}
+                    </span>
+                  )}
+                </button>
+
+                {/* Mis Casos Activos */}
+                <button
+                  onClick={() => handleNavigate('chat')}
+                  className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
+                    activeTab === 'ACTIVE'
+                      ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
+                      : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
+                  }`}
+                >
+                  <MessageSquare className="w-4 h-4 text-emerald-600" />
+                  <span>Mis Pacientes en Atención</span>
+                  {myActiveCount > 0 && (
+                    <span className="text-[11px] px-2 py-0.5 rounded-full font-bold font-mono bg-emerald-100 text-emerald-800">
+                      {myActiveCount}
+                    </span>
+                  )}
+                </button>
+
+                {/* Directorio de Psicólogos */}
+                <button
+                  onClick={() => handleNavigate('psicologos')}
+                  className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
+                    activeTab === 'PSYCHOLOGISTS'
+                      ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
+                      : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
+                  }`}
+                >
+                  <Users className="w-4 h-4 text-cyan-400" />
+                  <span>Directorio de Psicólogos</span>
+                  <span className="text-[11px] px-2 py-0.5 rounded-full font-bold font-mono bg-cyan-900/60 text-cyan-200 border border-cyan-500/30">
+                    {allPsychologists.length || 1}
                   </span>
-                )}
-              </button>
+                </button>
 
-              {/* Mis Casos Activos */}
-              <button
-                onClick={() => handleNavigate('chat')}
-                className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
-                  activeTab === 'ACTIVE'
-                    ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
-                    : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
+                {/* Historial Clínico Firebase */}
+                <button
+                  onClick={() => handleNavigate('expedientes')}
+                  className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
+                    activeTab === 'RECORDS'
+                      ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
+                      : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
+                  }`}
+                >
+                  <Database className="w-4 h-4 text-blue-400" />
+                  <span>Historias Clínicas Digitales</span>
+                </button>
+
+                {/* Monitor IA */}
+                <button
+                  onClick={() => handleNavigate('supervisor')}
+                  className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
+                    activeTab === 'SUPERVISOR'
+                      ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
+                      : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
+                  }`}
+                >
+                  <Bot className="w-4 h-4 text-purple-400" />
+                  <span>Supervisor Clínico IA</span>
+                  {aiCount > 0 && (
+                    <span className="text-[11px] px-2 py-0.5 rounded-full font-mono bg-purple-100 text-purple-900">
+                      {aiCount}
+                    </span>
+                  )}
+                </button>
+              </nav>
+
+              {/* Right Edge Subtle Fade Indicator */}
+              <div
+                className={`absolute right-0 top-0 bottom-0 w-3.5 pointer-events-none z-20 bg-gradient-to-l from-[#0B2545]/60 to-transparent transition-opacity duration-300 ${
+                  canScrollRight ? 'opacity-100' : 'opacity-0'
                 }`}
-              >
-                <MessageSquare className="w-4 h-4 text-emerald-600" />
-                <span>Mis Pacientes en Atención</span>
-                {myActiveCount > 0 && (
-                  <span className="text-[11px] px-2 py-0.5 rounded-full font-bold font-mono bg-emerald-100 text-emerald-800">
-                    {myActiveCount}
-                  </span>
-                )}
-              </button>
+                aria-hidden="true"
+              />
+            </div>
 
-              {/* Directorio de Psicólogos */}
-              <button
-                onClick={() => handleNavigate('psicologos')}
-                className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
-                  activeTab === 'PSYCHOLOGISTS'
-                    ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
-                    : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
-                }`}
-              >
-                <Users className="w-4 h-4 text-cyan-400" />
-                <span>Directorio de Psicólogos</span>
-                <span className="text-[11px] px-2 py-0.5 rounded-full font-bold font-mono bg-cyan-900/60 text-cyan-200 border border-cyan-500/30">
-                  {allPsychologists.length || 1}
-                </span>
-              </button>
-
-              {/* Historial Clínico Firebase */}
-              <button
-                onClick={() => handleNavigate('expedientes')}
-                className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
-                  activeTab === 'RECORDS'
-                    ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
-                    : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
-                }`}
-              >
-                <Database className="w-4 h-4 text-blue-400" />
-                <span>Historias Clínicas Digitales</span>
-              </button>
-
-              {/* Monitor IA */}
-              <button
-                onClick={() => handleNavigate('supervisor')}
-                className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
-                  activeTab === 'SUPERVISOR'
-                    ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
-                    : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
-                }`}
-              >
-                <Bot className="w-4 h-4 text-purple-400" />
-                <span>Supervisor Clínico IA</span>
-                {aiCount > 0 && (
-                  <span className="text-[11px] px-2 py-0.5 rounded-full font-mono bg-purple-100 text-purple-900">
-                    {aiCount}
-                  </span>
-                )}
-              </button>
-            </nav>
-
-            {/* Right Edge Subtle Fade Indicator */}
-            <div
-              className={`absolute right-0 top-0 bottom-0 w-3.5 pointer-events-none z-20 bg-gradient-to-l from-[#0B2545]/60 to-transparent transition-opacity duration-300 ${
-                canScrollRight ? 'opacity-100' : 'opacity-0'
+            {/* Right scroll navigation arrow */}
+            <button
+              onClick={() => scrollNav('right')}
+              className={`hidden sm:flex shrink-0 ml-2 p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition active:scale-95 z-30 ${
+                !canScrollRight ? 'opacity-40 cursor-default' : ''
               }`}
-              aria-hidden="true"
-            />
+              title="Desplazar hacia la derecha"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
           </div>
-
-          {/* Right scroll navigation arrow */}
-          <button
-            onClick={() => scrollNav('right')}
-            className={`hidden sm:flex shrink-0 ml-2 p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition active:scale-95 z-30 ${
-              !canScrollRight ? 'opacity-40 cursor-default' : ''
-            }`}
-            title="Desplazar hacia la derecha"
-          >
-            <ChevronRight className="w-4 h-4" />
-          </button>
+          
+          {/* Franja Bandera de Bogotá D.C. (Amarillo y Rojo) */}
+          <div className="bogota-flag-ribbon w-full"></div>
         </div>
-        
-        {/* Franja Bandera de Bogotá D.C. (Amarillo y Rojo) */}
-        <div className="bogota-flag-ribbon w-full"></div>
       </div>
 
       {/* 3. Main View Container */}

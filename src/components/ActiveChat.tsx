@@ -118,7 +118,7 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
   const [isAnalyzingSentiment, setIsAnalyzingSentiment] = useState(false);
   const [showSentimentDetail, setShowSentimentDetail] = useState(false);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   // Active cases claimed by this specialist or in human mode
   const activeCases = sessions.filter(
@@ -137,9 +137,15 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
     }
   }, [currentSession?.id]);
 
+  // Smoothly scroll only the messages container WITHOUT forcing whole window scroll
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [currentSession?.messages]);
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTo({
+        top: messagesContainerRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
+  }, [currentSession?.messages?.length, currentSession?.id]);
 
   // Analyze Sentiment with Gemini on latest patient message
   useEffect(() => {
@@ -287,10 +293,10 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-140px)] min-h-[680px]">
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 h-[calc(100dvh-200px)] min-h-[520px]">
       
       {/* 1. Left: Patient Caseload List (3 cols) */}
-      <div className="lg:col-span-3 bg-slate-900 rounded-2xl border border-slate-800 flex flex-col overflow-hidden shadow-lg">
+      <div className="lg:col-span-3 bg-slate-900 rounded-2xl border border-slate-800 flex flex-col h-full overflow-hidden shadow-lg">
         <div className="p-4 border-b border-slate-800 bg-slate-850/50">
           <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
             <span>Mis Casos Activos</span>
@@ -341,10 +347,10 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
       </div>
 
       {/* 2. Center: WhatsApp Live Chat Workstation (6 cols) */}
-      <div className="lg:col-span-6 bg-slate-900 rounded-2xl border border-slate-800 flex flex-col overflow-hidden shadow-xl">
+      <div className="lg:col-span-6 bg-slate-900 rounded-2xl border border-slate-800 flex flex-col h-full overflow-hidden shadow-xl">
         
         {/* Chat Header */}
-        <div className="p-4 border-b border-slate-800 bg-slate-850 flex flex-col gap-3">
+        <div className="p-4 border-b border-slate-800 bg-slate-850 flex flex-col gap-3 shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center font-bold text-white border border-slate-600">
@@ -485,7 +491,10 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
         </div>
 
         {/* Chat Messages Feed */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gradient-to-b from-slate-950/40 via-slate-900 to-slate-950/40">
+        <div 
+          ref={messagesContainerRef}
+          className="flex-1 overflow-y-auto p-4 space-y-3 bg-gradient-to-b from-slate-950/40 via-slate-900 to-slate-950/40 scroll-smooth"
+        >
           {currentSession.messages.map((msg) => {
             const isUser = msg.sender === 'user';
             const isPsychologist = msg.sender === 'psychologist';
@@ -585,12 +594,11 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
               </div>
             );
           })}
-          <div ref={messagesEndRef} />
         </div>
 
         {/* Twilio Outbound Delivery Alerts / Notice */}
         {sendError && (
-          <div className="px-4 py-2 bg-red-950/90 border-t border-red-500/50 text-xs text-red-200 flex items-center justify-between animate-in fade-in">
+          <div className="px-4 py-2 bg-red-950/90 border-t border-red-500/50 text-xs text-red-200 flex items-center justify-between animate-in fade-in shrink-0">
             <div className="flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
               <span><strong>Aviso Twilio:</strong> {sendError}</span>
@@ -605,7 +613,7 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
         )}
 
         {/* Input Area */}
-        <div className="p-3 bg-slate-850 border-t border-slate-800 space-y-2">
+        <div className="p-3 bg-slate-850 border-t border-slate-800 space-y-2 shrink-0">
           <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
             <span className="flex items-center gap-1.5 font-mono text-emerald-400">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -653,7 +661,7 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
       </div>
 
       {/* 3. Right: Clinical Dossier & Triage Record (3 cols) */}
-      <div className="lg:col-span-3 bg-slate-900 rounded-2xl border border-slate-800 flex flex-col overflow-hidden shadow-lg p-4 space-y-4 overflow-y-auto">
+      <div className="lg:col-span-3 bg-slate-900 rounded-2xl border border-slate-800 flex flex-col h-full overflow-hidden shadow-lg p-4 space-y-4 overflow-y-auto">
         
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">

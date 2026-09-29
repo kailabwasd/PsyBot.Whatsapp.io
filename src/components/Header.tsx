@@ -58,7 +58,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-40 shadow-sm">
+    <header className="w-full shadow-sm">
       {/* 1. Barra Superior Institucional GOV.CO (Estilo Oficial Colombia & Bogotá.gov.co) */}
       <div className="bg-[#004884] text-white text-[11px] font-medium border-b border-[#003866]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-8 flex items-center justify-between">
