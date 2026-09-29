@@ -37,7 +37,7 @@ export const IntegrationDocs: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           toPhone: testPhone.trim(),
-          testMessage: '🟢 ¡Conexión con MindBridge confirmada! Tu WhatsApp está vinculado exitosamente con la Guardia de Salud Mental 24/7.'
+          testMessage: '🟢 ¡Conexión con PsyBot - SubaTech confirmada! Tu WhatsApp está vinculado exitosamente con la Guardia de Salud Mental 24/7.'
         })
       });
 
@@ -88,7 +88,7 @@ async def whatsapp_webhook(From: str = Form(...), Body: str = Form(...)):
   const contentApiJson = `{
   "types": {
     "twilio/quick-reply": {
-      "body": "Hola Mariana, bienvenida a MindBridge 🌿 ¿De qué forma prefieres que te acompañemos hoy?",
+      "body": "Hola Mariana, bienvenida a PsyBot - SubaTech 🌿 ¿De qué forma prefieres que te acompañemos hoy?",
       "actions": [
         { "id": "btn_ai", "title": "1. Asistente IA 🤍" },
         { "id": "btn_human", "title": "2. Psicólogo Especialista 🩺" },

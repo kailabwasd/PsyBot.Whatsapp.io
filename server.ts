@@ -1109,7 +1109,7 @@ async function processIncomingWhatsAppMessage(
   if (lowerText === '#menu' || lowerText === 'menu' || lowerText === 'inicio') {
     const isHuman = session.state === 'HUMAN_MODE';
     const isWaiting = session.state === 'WAITING_PSYCHOLOGIST';
-    const reply = `🌿 *MindBridge - Asistencia Emocional y Terapia*
+    const reply = `🌿 *PsyBot - SubaTech · Asistencia Emocional y Terapia*
 
 Hola *${session.userName || 'estimado(a) paciente'}*.
 
@@ -2062,7 +2062,7 @@ app.post('/api/sessions/close', (req, res) => {
   const farewellMsg: ChatMessage = {
     id: `bot-${Date.now()}`,
     sender: 'bot',
-    text: `🌿 ${session.userName}, tu sesión con el especialista ha concluido. Recuerda que MindBridge está disponible las 24/7. Si requieres apoyo en el futuro, solo escribe un mensaje aquí. Te deseamos mucho bienestar.`,
+    text: `🌿 ${session.userName}, tu sesión con el especialista ha concluido. Recuerda que PsyBot - SubaTech está disponible las 24/7. Si requieres apoyo en el futuro, solo escribe un mensaje aquí. Te deseamos mucho bienestar.`,
     timestamp: Date.now(),
   };
   session.messages.push(farewellMsg);
@@ -2220,6 +2220,74 @@ Responde en formato JSON válido.`;
   }
 });
 
+// POST generate AI tags for patient sessions with Gemini
+app.post('/api/gemini/tags', async (req, res) => {
+  const { summary, messages, patientName } = req.body;
+  if (!summary && (!messages || !Array.isArray(messages))) {
+    return res.status(400).json({ error: 'Summary or messages are required for AI tagging' });
+  }
+
+  const textContent = summary || messages.map((m: any) => `${m.sender}: ${m.text}`).join('\n');
+
+  if (!process.env.GEMINI_API_KEY) {
+    const lower = textContent.toLowerCase();
+    const tags: string[] = ['Atención Inicial'];
+    if (lower.includes('suicid') || lower.includes('morir') || lower.includes('quitarme')) tags.push('Ideación Suicida');
+    if (lower.includes('ansied') || lower.includes('pánico') || lower.includes('miedo')) tags.push('Ansiedad');
+    if (lower.includes('duelo') || lower.includes('muerte') || lower.includes('perdida')) tags.push('Duelo');
+    if (lower.includes('depres') || lower.includes('triste') || lower.includes('solo')) tags.push('Depresión');
+    if (lower.includes('violencia') || lower.includes('golpes') || lower.includes('abuso')) tags.push('Violencia');
+    if (lower.includes('familia') || lower.includes('pareja')) tags.push('Conflictos Familiares');
+    return res.json({ success: true, tags: Array.from(new Set(tags)), source: 'local_heuristic' });
+  }
+
+  try {
+    const prompt = `Actúa como un sistema experto de triaje psicológico de salud mental distrital (SubaTECH).
+Analiza el siguiente resumen clínico y mensajes de un paciente y asígnale de 1 a 4 etiquetas clínicas clave, cortas y precisas en español (ej. 'Ansiedad', 'Ideación Suicida', 'Duelo', 'Depresión', 'Violencia Intrafamiliar', 'Ataque de Pánico', 'Estrés Postraumático', 'Conflictos de Pareja', 'Consumo de Sustancias', 'Soledad').
+
+Paciente: ${patientName || 'Paciente'}
+Resumen / Mensajes:
+${textContent}
+
+Responde estrictamente en formato JSON con la propiedad "tags" que sea un array de strings (máximo 4 etiquetas en español).`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            tags: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description: 'Lista de 1 a 4 etiquetas clínicas en español',
+            },
+          },
+          required: ['tags'],
+        },
+      },
+    });
+
+    const parsed = JSON.parse(response.text?.trim() || '{}');
+    const tags = Array.isArray(parsed.tags) && parsed.tags.length > 0 ? parsed.tags : ['Atención Inicial', 'Evaluación Triage'];
+
+    return res.json({ success: true, tags, source: 'gemini' });
+  } catch (err: any) {
+    console.warn('Gemini tagging quota/error, falling back to local heuristic:', err?.message || err);
+    const lower = textContent.toLowerCase();
+    const tags: string[] = ['Atención Inicial'];
+    if (lower.includes('suicid') || lower.includes('morir') || lower.includes('quitarme')) tags.push('Ideación Suicida');
+    if (lower.includes('ansied') || lower.includes('pánico') || lower.includes('miedo')) tags.push('Ansiedad');
+    if (lower.includes('duelo') || lower.includes('muerte') || lower.includes('perdida')) tags.push('Duelo');
+    if (lower.includes('depres') || lower.includes('triste') || lower.includes('solo')) tags.push('Depresión');
+    if (lower.includes('violencia') || lower.includes('golpes') || lower.includes('abuso')) tags.push('Violencia');
+    if (lower.includes('familia') || lower.includes('pareja')) tags.push('Conflictos Familiares');
+    return res.json({ success: true, tags: Array.from(new Set(tags)), source: 'heuristic_fallback' });
+  }
+});
+
 // Status & diagnostics
 app.get('/api/health', (req, res) => {
   const envStatus = validateEnvironmentVariables();
@@ -2270,7 +2338,7 @@ app.post('/api/twilio/test', async (req, res) => {
     });
   }
 
-  const messageText = testMessage || '🟢 MindBridge: Prueba de conexión exitosa con Twilio WhatsApp API.';
+  const messageText = testMessage || '🟢 PsyBot - SubaTech: Prueba de conexión exitosa con Twilio WhatsApp API.';
   const result = await sendTwilioWhatsAppMessage(sanitized, messageText);
 
   if (result.success) {

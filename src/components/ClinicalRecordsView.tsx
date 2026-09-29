@@ -235,7 +235,7 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
       const res = await exportClinicalRecordsToGoogleSheets(
         token, 
         records, 
-        `MindBridge - Historiales Clínicos (${new Date().toLocaleDateString()})`
+        `PsyBot - SubaTech - Historiales Clínicos (${new Date().toLocaleDateString()})`
       );
 
       setExportedSheetUrl(res.spreadsheetUrl);

@@ -16,7 +16,7 @@ export interface GoogleSheetCreationResult {
 export async function exportClinicalRecordsToGoogleSheets(
   accessToken: string,
   records: ClinicalRecord[],
-  sheetTitle: string = `MindBridge - Historiales Clínicos (${new Date().toLocaleDateString()})`
+  sheetTitle: string = `PsyBot - SubaTech - Historiales Clínicos (${new Date().toLocaleDateString()})`
 ): Promise<GoogleSheetCreationResult> {
   if (!accessToken) {
     throw new Error('Access Token no disponible. Inicie sesión con Google primero.');

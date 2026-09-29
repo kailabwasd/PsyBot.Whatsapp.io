@@ -687,4 +687,22 @@ export async function triggerAdminTestReport(): Promise<{ success: boolean; mess
   return res.json();
 }
 
+export async function generateAiTags(payload: { summary?: string; messages?: any[]; patientName?: string }): Promise<string[]> {
+  const base = getApiBaseUrl();
+  try {
+    const res = await fetch(`${base}/api/gemini/tags`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) return ['Atención Inicial'];
+    const data = await res.json();
+    return Array.isArray(data.tags) ? data.tags : ['Atención Inicial'];
+  } catch (err) {
+    console.error('Error calling AI tagging endpoint:', err);
+    return ['Atención Inicial'];
+  }
+}
+
+
 

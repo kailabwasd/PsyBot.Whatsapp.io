@@ -110,7 +110,7 @@ export const WhatsAppSimulator: React.FC<WhatsAppSimulatorProps> = ({
               </div>
               <div>
                 <h4 className="text-sm font-semibold text-white leading-tight flex items-center gap-1.5">
-                  MindBridge Emocional
+                  PsyBot - SubaTech
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" title="Verificado Twilio"></span>
                 </h4>
                 <p className="text-[10px] text-emerald-400 font-medium">
@@ -195,7 +195,7 @@ export const WhatsAppSimulator: React.FC<WhatsAppSimulatorProps> = ({
             {isSending && (
               <div className="flex items-center space-x-2 text-[11px] text-slate-400 italic">
                 <span className="w-2 h-2 rounded-full bg-teal-400 animate-ping"></span>
-                <span>MindBridge está escribiendo...</span>
+                <span>PsyBot está escribiendo...</span>
               </div>
             )}
           </div>
