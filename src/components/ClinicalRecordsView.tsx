@@ -247,12 +247,17 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
     }
   };
 
-  // Filter records
+  // Filter records by name, ID, diagnostic impressions, phone, primary emotion, or triage summary
   const filteredRecords = records.filter(r => {
-    const matchesSearch = 
-      r.patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      r.phoneNumber.includes(searchQuery) ||
-      r.id.toLowerCase().includes(searchQuery.toLowerCase());
+    const q = searchQuery.toLowerCase().trim();
+    
+    const matchesSearch = !q || 
+      r.patientName.toLowerCase().includes(q) ||
+      r.phoneNumber.includes(q) ||
+      r.id.toLowerCase().includes(q) ||
+      r.diagnosticImpressions?.some(di => di.toLowerCase().includes(q)) ||
+      r.primaryEmotion?.toLowerCase().includes(q) ||
+      r.triageSummary?.toLowerCase().includes(q);
 
     const matchesRisk = filterRisk === 'ALL' || r.riskLevel === filterRisk;
     return matchesSearch && matchesRisk;
@@ -353,31 +358,51 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
           {/* Search and filters */}
           <div className="p-4 border-b border-slate-800 space-y-3 bg-slate-850/60">
             <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
+              <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
               <input
                 type="text"
-                placeholder="Buscar por nombre, teléfono o ID..."
+                placeholder="Buscar por nombre, ID o diagnóstico (ej. Duelo, Ansiedad)..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-750 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"
+                className="w-full bg-slate-950 border border-slate-750 rounded-xl pl-9 pr-8 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 transition"
               />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-2.5 text-slate-400 hover:text-white text-xs bg-slate-800 hover:bg-slate-700 rounded-full w-4 h-4 flex items-center justify-center transition"
+                  title="Limpiar filtro"
+                >
+                  ✕
+                </button>
+              )}
             </div>
 
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px]">
-              {(['ALL', 'CRISIS', 'ALTO', 'MODERADO', 'BAJO'] as const).map((r) => (
-                <button
-                  key={r}
-                  onClick={() => setFilterRisk(r)}
-                  className={`px-2.5 py-1 rounded-lg font-medium transition whitespace-nowrap ${
-                    filterRisk === r 
-                      ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40' 
-                      : 'text-slate-400 hover:text-white bg-slate-950/60'
-                  }`}
-                >
-                  {r === 'ALL' ? 'Todos' : r}
-                </button>
-              ))}
+            <div className="flex items-center justify-between gap-1.5 overflow-x-auto pb-1 text-[11px]">
+              <div className="flex items-center gap-1.5 overflow-x-auto">
+                {(['ALL', 'CRISIS', 'ALTO', 'MODERADO', 'BAJO'] as const).map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => setFilterRisk(r)}
+                    className={`px-2.5 py-1 rounded-lg font-medium transition whitespace-nowrap ${
+                      filterRisk === r 
+                        ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40 font-bold' 
+                        : 'text-slate-400 hover:text-white bg-slate-950/60'
+                    }`}
+                  >
+                    {r === 'ALL' ? 'Todos' : r}
+                  </button>
+                ))}
+              </div>
             </div>
+
+            {(searchQuery || filterRisk !== 'ALL') && (
+              <div className="text-[10px] text-teal-400 flex items-center justify-between px-1">
+                <span>Filtrando por: <strong>{searchQuery || filterRisk}</strong></span>
+                <span className="font-mono bg-teal-950/60 text-teal-300 px-1.5 py-0.5 rounded border border-teal-800/40">
+                  {filteredRecords.length} de {records.length}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Records list */}
@@ -388,8 +413,16 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
                 Cargando expedientes desde Firestore...
               </div>
             ) : filteredRecords.length === 0 ? (
-              <div className="p-8 text-center text-slate-500 text-xs">
-                No se encontraron expedientes con los criterios seleccionados.
+              <div className="p-8 text-center text-slate-500 text-xs space-y-2">
+                <p>No se encontraron expedientes con los criterios seleccionados.</p>
+                {searchQuery && (
+                  <button 
+                    onClick={() => setSearchQuery('')}
+                    className="text-teal-400 hover:underline text-[11px] font-semibold"
+                  >
+                    Limpiar búsqueda ({searchQuery})
+                  </button>
+                )}
               </div>
             ) : (
               filteredRecords.map((rec) => {
@@ -408,21 +441,26 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
                     }`}
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center justify-between gap-2">
                         <span className="font-bold text-white text-xs truncate">
                           {rec.patientName}
                         </span>
-                        <span className="text-[10px] text-slate-400 font-mono">
-                          {rec.age} años
+                        <span className="text-[10px] text-slate-400 font-mono flex-shrink-0">
+                          {rec.id}
                         </span>
                       </div>
                       
                       <p className="text-[11px] text-slate-400 truncate mt-0.5">
-                        {rec.phoneNumber}
+                        {rec.phoneNumber} • {rec.age} años
                       </p>
 
-                      <div className="mt-2 flex items-center gap-2">
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
                         {getRiskBadge(rec.riskLevel)}
+                        {rec.diagnosticImpressions && rec.diagnosticImpressions.length > 0 && (
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800/90 text-teal-300 border border-slate-700 truncate max-w-[140px]" title={rec.diagnosticImpressions.join(', ')}>
+                            #{rec.diagnosticImpressions[0]}
+                          </span>
+                        )}
                       </div>
                     </div>
 

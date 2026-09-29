@@ -112,6 +112,71 @@ export async function exportClinicalRecordsToGoogleSheets(
     throw new Error('La hoja fue creada pero falló la inserción de las filas de expedientes.');
   }
 
+  // 4. Format the spreadsheet (header styling, frozen row, auto column width)
+  try {
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        requests: [
+          // Freeze header row
+          {
+            updateSheetProperties: {
+              properties: {
+                sheetId: 0,
+                gridProperties: {
+                  frozenRowCount: 1,
+                },
+              },
+              fields: 'gridProperties.frozenRowCount',
+            },
+          },
+          // Header formatting (navy background, white bold text, centered)
+          {
+            repeatCell: {
+              range: {
+                sheetId: 0,
+                startRowIndex: 0,
+                endRowIndex: 1,
+                startColumnIndex: 0,
+                endColumnIndex: headers.length,
+              },
+              cell: {
+                userEnteredFormat: {
+                  backgroundColor: { red: 0.04, green: 0.15, blue: 0.27 }, // SubaTECH Navy #0B2545
+                  textFormat: {
+                    foregroundColor: { red: 1, green: 1, blue: 1 },
+                    bold: true,
+                    fontSize: 11,
+                  },
+                  horizontalAlignment: 'CENTER',
+                  verticalAlignment: 'MIDDLE',
+                },
+              },
+              fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)',
+            },
+          },
+          // Auto-fit column widths
+          {
+            autoResizeDimensions: {
+              dimensions: {
+                sheetId: 0,
+                dimension: 'COLUMNS',
+                startIndex: 0,
+                endIndex: headers.length,
+              },
+            },
+          },
+        ],
+      }),
+    });
+  } catch (formatErr) {
+    console.warn('Non-blocking Google Sheets styling batchUpdate error:', formatErr);
+  }
+
   return {
     spreadsheetId,
     spreadsheetUrl,
