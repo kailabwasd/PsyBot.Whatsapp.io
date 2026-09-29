@@ -869,12 +869,78 @@ TUS PRINCIPIOS CLÍNICOS DE RESPUESTA PERSONALIZADA:
    - Usa *negrita* o *cursiva* para dar calidez y resaltar pasos o ideas clave.
    - Tono: Profesional, humano, compasivo, seguro, respetuoso y libre de juicios.`;
 
+// Interface and Middleware for Session Phase & Tone Analysis
+export interface ClinicalSessionPhaseAnalysis {
+  phase: 'INICIAL_ACOGIDA' | 'EVALUACION_EXPLORACION' | 'INTERVENCION_CONTENCION';
+  recommendedTone: 'empático' | 'directivo' | 'contención';
+  toneGuidance: string;
+  avoidPhrases: string[];
+}
+
+export function analyzeConversationStateAndTone(
+  contextMessages: ChatMessage[],
+  session?: PatientSession
+): ClinicalSessionPhaseAnalysis {
+  const userMessages = (contextMessages || []).filter(m => m.sender === 'user');
+  const botMessages = (contextMessages || []).filter(m => m.sender === 'bot' || m.sender === 'psychologist');
+  const userMsgCount = userMessages.length;
+
+  const riskLevel = session?.riskLevel || 'BAJO';
+  const isHighRisk = riskLevel === 'CRISIS' || riskLevel === 'ALTO';
+
+  let phase: ClinicalSessionPhaseAnalysis['phase'] = 'INICIAL_ACOGIDA';
+  let recommendedTone: ClinicalSessionPhaseAnalysis['recommendedTone'] = 'empático';
+
+  if (isHighRisk || userMsgCount >= 7) {
+    phase = 'INTERVENCION_CONTENCION';
+    recommendedTone = isHighRisk ? 'contención' : 'directivo';
+  } else if (userMsgCount >= 3) {
+    phase = 'EVALUACION_EXPLORACION';
+    recommendedTone = 'empático';
+  } else {
+    phase = 'INICIAL_ACOGIDA';
+    recommendedTone = 'empático';
+  }
+
+  let toneGuidance = '';
+  if (phase === 'INICIAL_ACOGIDA') {
+    toneGuidance = `FASE 1: ACOGIDA Y RAPPORT (Tono: Calido, Empático, Acogedor).
+- Objetivo: Establecer un espacio seguro, calmar la incertidumbre inicial y validar emociones sin abrumar.
+- Estilo: Saludo cercano pero profesional, escucha atenta y preguntas abiertas suaves.`;
+  } else if (phase === 'EVALUACION_EXPLORACION') {
+    toneGuidance = `FASE 2: EVALUACIÓN Y EXPLORACIÓN (Tono: Empático, Reflexivo, Analítico).
+- Objetivo: Profundizar en los detonantes del malestar, identificar recursos de afrontamiento y reencuadrar pensamientos.
+- Estilo: Refleja las palabras del paciente, haz una pausa reflexiva y realiza 1 pregunta puntual de introspección.`;
+  } else {
+    toneGuidance = `FASE 3: INTERVENCIÓN Y CONTENCÓN (Tono: Directivo, Claro, Estructurado, de Contención).
+- Objetivo: Brindar micro-técnicas concretas de regulación emocional (respiración, anclaje, plan de seguridad) y pautas de acción claras.
+- Estilo: Pasos numerados claros, oraciones breves, firmes pero profundamente compasivas.`;
+  }
+
+  const avoidPhrases: string[] = [];
+  botMessages.slice(-3).forEach(m => {
+    const text = m.text.trim();
+    if (text.length > 15) {
+      const firstSentence = text.split('\n')[0].split('.')[0].substring(0, 45);
+      if (firstSentence) avoidPhrases.push(firstSentence);
+    }
+  });
+
+  return {
+    phase,
+    recommendedTone,
+    toneGuidance,
+    avoidPhrases,
+  };
+}
+
 // Helper: Context-aware personalized empathetic responder when external LLM has quota limits or is offline
-function generateSmartClinicalResponse(prompt: string, session?: PatientSession): string {
+function generateSmartClinicalResponse(prompt: string, session?: PatientSession, phaseAnalysis?: ClinicalSessionPhaseAnalysis): string {
   const lower = prompt.toLowerCase().trim();
   const userName = session?.userName && session.userName !== 'Paciente WhatsApp' ? session.userName : '';
   const greeting = userName ? `Hola *${userName}*, ` : 'Hola, ';
   const msgCount = session?.messages?.length || 1;
+  const currentPhase = phaseAnalysis?.phase || 'INICIAL_ACOGIDA';
 
   // Varied empathetic openers
   const openers = [
@@ -887,6 +953,9 @@ function generateSmartClinicalResponse(prompt: string, session?: PatientSession)
 
   // Miedo, pánico, ansiedad
   if (lower.includes('ansiedad') || lower.includes('ansioso') || lower.includes('ansiosa') || lower.includes('panico') || lower.includes('pánico') || lower.includes('nervios') || lower.includes('asustado') || lower.includes('miedo')) {
+    if (currentPhase === 'INTERVENCION_CONTENCION') {
+      return `${greeting}*vamos a aplicar una técnica directa de regulación para bajar la ansiedad ahora mismo:*\n\n1. *Inhala en 4 segundos* inflando el abdomen.\n2. *Sostén 4 segundos* sintiendo el apoyo firmes de tu espalda o pies.\n3. *Exhala en 6 segundos* soltando intencionalmente mandíbula y hombros.\n\nHagámoslo 3 veces seguidas. ¿Sientes que el ritmo de tu pulso o respiración empieza a calmarse? (Recuerda escribir *#psicologo* si deseas atención humana de guardia).`;
+    }
     const anxietyReplies = [
       `${selectedOpener}*comprendo profundamente cómo la ansiedad aceleró tus pensamientos.* Lo que estás experimentando en tu cuerpo es una respuesta de alerta física, pero en este momento estás en un espacio seguro.\n\nHagamos un ejercicio de anclaje de 30 segundos:\n1. *Inhala lentamente* por la nariz contando 4 segundos.\n2. *Sostén la respiración* 4 segundos sintiendo tus pies firmes en el suelo.\n3. *Exhala despacio* por la boca en 6 segundos soltando los hombros.\n\n¿Qué pensamiento o sensación física sientes con mayor fuerza en este momento? (Si prefieres ser atendido por un psicólogo humano real, escribe *#psicologo*).`,
       `${selectedOpener}*sé lo agotadora que puede ser la opresión por la ansiedad.* Cuando la mente se desborda, el cuerpo reacciona en alerta máxima.\n\nVamos a traer la atención al presente: nombra 3 objetos que veas a tu alrededor y haz una inhalación profunda. Tómate tu tiempo. ¿En qué parte del cuerpo sientes más la tensión? (Recuerda que si deseas atención de un terapeuta de guardia, solo escribe *#psicologo*).`
@@ -932,26 +1001,44 @@ function generateSmartClinicalResponse(prompt: string, session?: PatientSession)
   return reflectiveReplies[msgCount % reflectiveReplies.length];
 }
 
-// Call Gemini API with model fallback hierarchy (gemini-3.8-flash -> gemini-3.1-flash-lite -> gemini-2.5-flash -> adaptive smart engine)
+// Call Gemini API with model fallback hierarchy and conversation state middleware
 async function callGeminiWithRetry(
   prompt: string, 
   contextMessages: ChatMessage[], 
   session?: PatientSession,
   retryCount = 0
 ): Promise<string> {
+  const phaseAnalysis = analyzeConversationStateAndTone(contextMessages || [], session);
+
   if (!process.env.GEMINI_API_KEY) {
-    return generateSmartClinicalResponse(prompt, session);
+    return generateSmartClinicalResponse(prompt, session, phaseAnalysis);
   }
 
   const candidateModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
-  const formattedHistory = contextMessages
+  const formattedHistory = (contextMessages || [])
     .slice(-8)
     .map(m => `${m.sender === 'user' ? (session?.userName || 'Paciente') : 'Aura (Psicóloga IA SubaTECH)'}: ${m.text}`)
     .join('\n');
 
+  const dynamicSystemInstruction = `${SYSTEM_INSTRUCTION}
+
+======================================================================
+MIDDLEWARE DE FASE Y TONO DE SESIÓN CLÍNICA (TIEMPO REAL):
+======================================================================
+- Fase Clínica Detectada: ${phaseAnalysis.phase}
+- Tono Recomendado: ${phaseAnalysis.recommendedTone.toUpperCase()}
+- Directriz Tonal Especializada:
+${phaseAnalysis.toneGuidance}
+
+REGLAS DE VARIACIÓN LINGÜÍSTICA Y PREVENCIÓN DE REPETICIONES:
+- EVITA REPETIR las siguientes frases/muletillas iniciales utilizadas en turnos previos:
+${phaseAnalysis.avoidPhrases.length > 0 ? phaseAnalysis.avoidPhrases.map(p => `  * "${p}"`).join('\n') : '  * N/A'}
+- Usa una variedad sintáctica fresca, natural y variada. Adapta tu respuesta exactamente a lo que el paciente acaba de expresar.`;
+
   const fullPrompt = `DATOS DEL PACIENTE:
 - Nombre: ${session?.userName || 'Paciente'}
 - Teléfono: ${session?.phoneNumber || session?.id || 'No especificado'}
+- Nivel de Riesgo: ${session?.riskLevel || 'BAJO'}
 
 HISTORIAL DE LA CONVERSACIÓN:
 ${formattedHistory}
@@ -959,7 +1046,7 @@ ${formattedHistory}
 NUEVO MENSAJE DEL PACIENTE:
 "${prompt}"
 
-Genera una respuesta personalizada, empática y terapéutica siguiendo las directrices de Aura:`;
+Genera la respuesta terapéutica respetando la Fase (${phaseAnalysis.phase}) y el Tono (${phaseAnalysis.recommendedTone}):`;
 
   for (const modelName of candidateModels) {
     try {
@@ -967,8 +1054,8 @@ Genera una respuesta personalizada, empática y terapéutica siguiendo las direc
         model: modelName,
         contents: fullPrompt,
         config: {
-          systemInstruction: SYSTEM_INSTRUCTION,
-          temperature: 0.7,
+          systemInstruction: dynamicSystemInstruction,
+          temperature: 0.75,
         },
       });
 
@@ -982,7 +1069,7 @@ Genera una respuesta personalizada, empática y terapéutica siguiendo las direc
   }
 
   // If all external LLM attempts were exhausted or hit quota, use adaptive smart engine
-  return generateSmartClinicalResponse(prompt, session);
+  return generateSmartClinicalResponse(prompt, session, phaseAnalysis);
 }
 
 // Emergency Crisis Hotline Message
