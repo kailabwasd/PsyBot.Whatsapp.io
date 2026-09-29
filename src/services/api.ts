@@ -100,6 +100,168 @@ export async function refreshTwilioConnectionTokens(): Promise<boolean> {
   }
 }
 
+// Target administrator phone for critical alerts
+export const DEFAULT_ADMIN_ALERT_PHONE = 'whatsapp:+573107956907';
+
+export interface CriticalErrorAlertPayload {
+  service: 'TWILIO' | 'FIRESTORE' | 'GEMINI' | 'GENERAL';
+  title: string;
+  details: string;
+  errorCode?: number | string;
+  targetPhone?: string;
+  suggestion?: string;
+  critical?: boolean;
+}
+
+let lastClientAlertTimestamp = 0;
+
+/**
+ * Registra un error crítico en el log centralizado del sistema y dispara automáticamente
+ * una alerta vía WhatsApp al número +573107956907.
+ */
+export async function logAndAlertCriticalError(payload: CriticalErrorAlertPayload): Promise<{
+  logged: boolean;
+  alertDispatched: boolean;
+  error?: string;
+}> {
+  const base = getApiBaseUrl();
+  console.error(`🚨 [CRITICAL ${payload.service} ERROR] ${payload.title}:`, payload.details);
+
+  // Throttle client-side alerts to max 1 every 6 seconds to prevent flood
+  const now = Date.now();
+  const shouldThrottle = now - lastClientAlertTimestamp < 6000;
+  if (!shouldThrottle) {
+    lastClientAlertTimestamp = now;
+  }
+
+  let logged = false;
+  let alertDispatched = false;
+
+  // 1. Envío al endpoint centralizado de alertas y registro
+  try {
+    const alertRes = await fetch(`${base}/api/admin/notifications/alert`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        service: payload.service,
+        title: payload.title,
+        details: payload.details,
+        errorCode: payload.errorCode,
+        suggestion: payload.suggestion,
+        phone: DEFAULT_ADMIN_ALERT_PHONE,
+      }),
+    });
+
+    if (alertRes.ok) {
+      const data = await alertRes.json();
+      logged = true;
+      alertDispatched = data.whatsappDispatched ?? true;
+      console.log(`[Alert System] Error crítico registrado en log centralizado y alerta enviada a ${DEFAULT_ADMIN_ALERT_PHONE}.`);
+      return { logged, alertDispatched };
+    }
+  } catch (err: any) {
+    console.warn('[Alert System] Endpoint /api/admin/notifications/alert no disponible, usando registro alternativo...', err);
+  }
+
+  // 2. Fallback de respaldo: Registro en log de errores del sistema
+  try {
+    const logRes = await fetch(`${base}/api/admin/error-logs/record`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        service: payload.service,
+        title: payload.title,
+        details: payload.details,
+        errorCode: payload.errorCode,
+        suggestion: payload.suggestion || 'Revisar consola y logs de auditoría.',
+        targetPhone: payload.targetPhone,
+      }),
+    });
+    if (logRes.ok) {
+      logged = true;
+    }
+  } catch (fallbackErr: any) {
+    console.error('[Alert System] Error guardando log en fallback:', fallbackErr);
+  }
+
+  return { logged, alertDispatched };
+}
+
+/**
+ * Reporta específicamente un error crítico de Twilio y dispara alerta a WhatsApp (+573107956907)
+ */
+export async function reportTwilioCriticalError(
+  err: any,
+  contextTitle: string = 'Fallo Crítico en Twilio WhatsApp',
+  extraDetails?: string
+): Promise<void> {
+  const message = err?.message || err?.error || String(err);
+  const errorCode = err?.errorCode || err?.status || err?.code;
+  
+  let suggestion = 'Revisa las credenciales de Twilio y los registros de consola.';
+  if (errorCode === 20003 || message.includes('401') || message.includes('20003')) {
+    suggestion = 'El TWILIO_AUTH_TOKEN configurado no coincide con tu consola Twilio o ha expirado. Actualízalo en Railway o en Configuración.';
+  } else if (errorCode === 63007 || message.includes('63007')) {
+    suggestion = 'Twilio no encontró el canal remitente. Activa el Sandbox de WhatsApp en console.twilio.com (Messaging -> Try it out).';
+  } else if (errorCode === 21608 || message.includes('21608')) {
+    suggestion = 'El número aún no se ha unido al Sandbox de WhatsApp. Envía el comando join al número de Twilio.';
+  }
+
+  await logAndAlertCriticalError({
+    service: 'TWILIO',
+    title: contextTitle,
+    details: `${message}${extraDetails ? ` | ${extraDetails}` : ''}`,
+    errorCode,
+    suggestion,
+    critical: true,
+  });
+}
+
+/**
+ * Reporta específicamente un error crítico de Firestore y dispara alerta a WhatsApp (+573107956907)
+ */
+export async function reportFirestoreCriticalError(
+  err: any,
+  operation: string = 'Operación de Base de Datos Firestore',
+  docOrCollection?: string
+): Promise<void> {
+  const code = err?.code || 'FIRESTORE_ERROR';
+  const message = err?.message || String(err);
+
+  let suggestion = 'Verifica la conexión a internet y las reglas de seguridad de Firestore (firestore.rules).';
+  if (String(code).includes('permission-denied') || message.includes('permission-denied')) {
+    suggestion = 'Permiso denegado en Firestore. Revisa las reglas de seguridad o autenticación del usuario.';
+  } else if (String(code).includes('unavailable') || message.includes('unavailable')) {
+    suggestion = 'Servicio de Firestore temporalmente inaccesible o fallo de conectividad de red.';
+  } else if (String(code).includes('resource-exhausted')) {
+    suggestion = 'Cuota de lectura/escritura de Cloud Firestore superada.';
+  }
+
+  await logAndAlertCriticalError({
+    service: 'FIRESTORE',
+    title: `Fallo Crítico Firestore: ${operation}`,
+    details: `Error en Firestore [${code}]: ${message}${docOrCollection ? ` | Ref: ${docOrCollection}` : ''}`,
+    errorCode: code,
+    suggestion,
+    critical: true,
+  });
+}
+
+/**
+ * Envoltorio seguro para llamadas asíncronas a Firestore con captura y reporte centralizado
+ */
+export async function executeFirestoreSafe<T>(
+  operation: () => Promise<T>,
+  context: { operationName: string; targetRef?: string }
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (err: any) {
+    await reportFirestoreCriticalError(err, context.operationName, context.targetRef);
+    throw err;
+  }
+}
+
 /**
  * Executes an async operation with exponential backoff and automatic token refresh on 401 Unauthorized
  */
@@ -156,7 +318,7 @@ export async function executeWithExponentialBackoff<T>(
     }
   }
 
-  // If all retries failed, log the definitive error
+  // If all retries failed, log the definitive error and trigger WhatsApp alert
   console.error(`[${serviceName} Backoff] All ${maxRetries + 1} attempts exhausted. Marking error as definitive.`);
   
   if (options.onDefinitiveError) {
@@ -164,6 +326,22 @@ export async function executeWithExponentialBackoff<T>(
       await options.onDefinitiveError(lastError);
     } catch (logErr) {
       console.warn('Error executing onDefinitiveError handler:', logErr);
+    }
+  } else {
+    const isTwilio = serviceName.toUpperCase().includes('TWILIO');
+    const isFirestore = serviceName.toUpperCase().includes('FIRESTORE');
+    if (isTwilio) {
+      await reportTwilioCriticalError(
+        lastError,
+        `Fallo Crítico Definitivo en ${serviceName}`,
+        `Agotados ${maxRetries + 1} intentos de reintento en backoff.`
+      ).catch(() => {});
+    } else if (isFirestore) {
+      await reportFirestoreCriticalError(
+        lastError,
+        `Fallo Crítico Definitivo en ${serviceName}`,
+        `Agotados ${maxRetries + 1} intentos de reintento en backoff.`
+      ).catch(() => {});
     }
   }
 
@@ -190,7 +368,17 @@ export async function claimSession(
     }
     const data = await res.json();
     return data.session;
-  }, { serviceName: 'TWILIO_CLAIM', maxRetries: 2 });
+  }, { 
+    serviceName: 'TWILIO_CLAIM', 
+    maxRetries: 2,
+    onDefinitiveError: async (err) => {
+      await reportTwilioCriticalError(
+        err,
+        'Fallo Crítico al Reclamar Paciente en Guardia',
+        `Sesión: ${sessionId} | Psicólogo: ${psychologistName}`
+      );
+    }
+  });
 }
 
 export async function sendPsychologistMessage(
@@ -219,19 +407,11 @@ export async function sendPsychologistMessage(
     maxRetries: 3, 
     initialDelayMs: 1000,
     onDefinitiveError: async (err) => {
-      try {
-        await fetch(`${base}/api/admin/error-logs/record`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            service: 'TWILIO',
-            title: 'Error Definitivo tras Reintentos (Exponential Backoff)',
-            details: `Fallaron todos los reintentos al enviar mensaje a la sesión ${sessionId}: ${err?.message}`,
-            errorCode: err?.errorCode || err?.status || 500,
-            suggestion: 'Revisa las credenciales de Twilio en Railway y verifica el saldo de tu cuenta.',
-          }),
-        });
-      } catch {}
+      await reportTwilioCriticalError(
+        err,
+        'Fallo Crítico al Despachar Mensaje de Psicólogo a WhatsApp',
+        `Sesión: ${sessionId} | Especialista: ${psychologistName}`
+      );
     }
   });
 }
@@ -260,7 +440,14 @@ export async function sendDirectTwilioWhatsApp(params: {
   }, { 
     serviceName: 'TWILIO_DIRECT', 
     maxRetries: 3, 
-    initialDelayMs: 1000 
+    initialDelayMs: 1000,
+    onDefinitiveError: async (err) => {
+      await reportTwilioCriticalError(
+        err,
+        'Fallo Crítico en Despacho Directo de WhatsApp',
+        `Destino: ${params.phoneNumber} | Especialista: ${params.psychologistName}`
+      );
+    }
   });
 }
 
@@ -416,7 +603,14 @@ export async function testTwilioConnection(params: {
     serviceName: 'TWILIO_TEST', 
     maxRetries: 2, 
     initialDelayMs: 800 
-  }).catch((err) => {
+  }).catch(async (err) => {
+    // Disparar reporte en log centralizado y alerta por WhatsApp al +573107956907
+    await reportTwilioCriticalError(
+      err,
+      'Fallo Crítico en Prueba de Conexión Twilio WhatsApp',
+      `Destino: ${params.toPhone || params.phoneNumber || 'N/A'}`
+    ).catch(() => {});
+
     return err.data || {
       success: false,
       error: err.message || 'Error de conexión con Twilio tras reintentos.',
@@ -446,7 +640,15 @@ export async function verifyTwilioCredentials(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ accountSid, authToken }),
   });
-  return res.json();
+  const data = await res.json();
+  if (!res.ok || data.success === false) {
+    await reportTwilioCriticalError(
+      { message: data.message || data.error, errorCode: data.errorCode || res.status },
+      'Fallo Crítico en Verificación de Credenciales Twilio',
+      `Account SID: ${accountSid ? accountSid.substring(0, 8) + '...' : 'Configurado'}`
+    ).catch(() => {});
+  }
+  return data;
 }
 
 export interface AdminNotificationSettings {

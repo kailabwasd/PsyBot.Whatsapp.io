@@ -8,6 +8,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 import speakeasy from 'speakeasy';
 import QRCode from 'qrcode';
 import type { PatientSession, ChatMessage, RiskLevel } from './src/types/index.ts';
+import { matchCrisisKeyword, CRISIS_KEYWORDS_DATABASE } from './src/lib/crisisKeywords.ts';
 
 dotenv.config();
 
@@ -839,102 +840,125 @@ function findSessionById(idOrPhone: string): PatientSession | undefined {
   return undefined;
 }
 
-// Helper: Detect crisis patterns
-function detectCrisisKeywords(text: string): boolean {
-  const lower = text.toLowerCase();
-  const crisisPatterns = [
-    'suicid',
-    'quitarme la vida',
-    'no quiero vivir',
-    'acabar con todo',
-    'matarme',
-    'cortarme',
-    'autolesion',
-    'lastimarme',
-    'tomarme todas las pastillas',
-    'ahorcarme',
-    'tirarme por',
-    'no tengo motivos para seguir',
-    'desearia estar muerto',
-    'morirme ya'
-  ];
-  return crisisPatterns.some(p => lower.includes(p));
+// Helper: Detect crisis patterns using comprehensive crisis keywords database
+function detectCrisisKeywords(text: string) {
+  return matchCrisisKeyword(text);
 }
 
-// System Instruction for Gemini Emotional AI (PsyBot)
-const SYSTEM_INSTRUCTION = `You are "PsyBot", an empathetic, highly professional digital psychological accompaniment assistant operating via WhatsApp.
-You are built on principles of Cognitive Behavioral Therapy (CBT), Motivational Interviewing, and Psychological First Aid (PFA).
+// System Instruction for Gemini Emotional AI (PsyBot Aura)
+const SYSTEM_INSTRUCTION = `Eres "Aura", la psicóloga y especialista en acompañamiento emocional de guardia con Inteligencia Artificial del programa distrital SubaTECH de Bogotá.
+Operas directamente a través de WhatsApp en el servicio de escucha activa, primeros auxilios psicológicos y contención 24/7.
 
-CRITICAL DISCLAIMER: You are NOT a licensed therapist, human doctor, or replacement for clinical psychotherapy. You provide supportive listening, emotional regulation exercises, and structured self-reflection.
+TUS PRINCIPIOS CLÍNICOS DE RESPUESTA PERSONALIZADA:
+1. HIPER-PERSONALIZACIÓN Y CONEXIÓN HUMANA:
+   - Responde SIEMPRE de forma directa, genuina y personalizada al mensaje específico que el paciente acaba de escribir.
+   - Refleja y valida exactamente lo que el paciente está sintiendo (nombra la emoción: angustia, agotamiento, tristeza, rabia, soledad, incertidumbre, etc.).
+   - NUNCA des respuestas robóticas ni párrafos prefabricados idénticos. Cita sutilmente lo que la persona compartió.
+   - Si conoces el nombre del paciente, dirígete a él/ella cálidamente.
 
-CONVERSATIONAL STYLE & FORMATTING RULES (WhatsApp Optimized):
-1. Tone: Empathetic, warm, calm, non-judgmental, active listener.
-2. Brevity: Maximum 2 to 4 short paragraphs per response. Avoid long blocks of text.
-3. Formatting: Use WhatsApp-friendly Markdown:
-   - Use *italics* for soft emphasis.
-   - Use *bold* for key terms or step numbers in grounding exercises.
-   - Use bullet points (-) for lists (max 3 items).
-4. Questions: Ask ONLY ONE open-ended reflection question per turn to avoid overwhelming the user.
+2. ESTRUCTURA DE CADA RESPUESTA:
+   - Párrafo 1: Acogida y validación empática profunda de lo que acaba de relatar.
+   - Párrafo 2: Reencuadre cognitivo-conductual o una micro-técnica práctica de respiración/anclaje/escucha adaptada a su caso particular.
+   - Párrafo 3: UNA SOLA pregunta reflexiva abierta que invite a profundizar con suavidad.
+   - Cierre: Recuerda brevemente que si en algún momento prefiere hablar con un psicólogo humano de nuestra guardia, solo debe escribir *#psicologo*.
 
-CLINICAL SAFETY & CRISIS PROTOCOL:
-If the user mentions suicide, self-harm, active ideation, severe domestic violence, abuse, or severe psychotic symptoms:
-1. Express immediate, non-judgmental empathy and validation.
-2. Clearly state that you are an AI and that their safety is the top priority.
-3. Provide emergency helpline numbers (Colombia: 106 o 192, Mexico: 800 911 2000, Spain: 024, International: 988).
-4. Keep response brief and focused strictly on safety.
+3. FORMATO WHATSAPP:
+   - Párrafos cortos y legibles (máximo 2 a 4 párrafos breves).
+   - Usa *negrita* o *cursiva* para dar calidez y resaltar pasos o ideas clave.
+   - Tono: Profesional, humano, compasivo, seguro, respetuoso y libre de juicios.`;
 
-Communicate in warm, empathetic Spanish.`;
-
-// Helper: Context-aware empathetic responder when no external LLM key is configured
-function generateSmartClinicalResponse(prompt: string): string {
+// Helper: Context-aware personalized empathetic responder when external LLM has quota limits or is offline
+function generateSmartClinicalResponse(prompt: string, session?: PatientSession): string {
   const lower = prompt.toLowerCase();
-  if (lower.includes('ansiedad') || lower.includes('ansioso') || lower.includes('ansiosa') || lower.includes('panico') || lower.includes('nervios')) {
-    return '🌱 *Comprendo profundamente cómo la ansiedad puede acelerar tus pensamientos y tu cuerpo.* \n\nVamos a dar un paso a la vez. Hagamos un breve ejercicio de anclaje:\n1. Respira profundo inhalando en 4 segundos.\n2. Sostén el aire 4 segundos.\n3. Exhala lentamente en 6 segundos.\n\n¿Sientes alguna sensación física predominante en este momento? Recuerda que si deseas que un profesional te atienda directamente, escribe *#psicologo*.';
+  const userName = session?.userName && session.userName !== 'Paciente WhatsApp' ? session.userName : '';
+  const greeting = userName ? `Hola *${userName}*, ` : 'Hola, ';
+
+  // Miedo, pánico, ansiedad
+  if (lower.includes('ansiedad') || lower.includes('ansioso') || lower.includes('ansiosa') || lower.includes('panico') || lower.includes('pánico') || lower.includes('nervios') || lower.includes('asustado') || lower.includes('miedo')) {
+    return `${greeting}*comprendo profundamente cómo la ansiedad puede acelerar tus pensamientos y hacerte sentir que pierdes el control.* Lo que estás experimentando en tu cuerpo es una respuesta de alerta, pero aquí estás a salvo.\n\nVamos a dar un paso a la vez. Hagamos un breve ejercicio de anclaje ahora mismo:\n1. *Inhala suavemente* por la nariz contando 4 segundos.\n2. *Sostén el aire* 4 segundos sintiendo tus pies firmes en el suelo.\n3. *Exhala despacio* por la boca en 6 segundos soltando los hombros.\n\n¿Qué sensación física o pensamiento predomina con más fuerza en este momento? Si en cualquier instante prefieres ser atendido por un psicólogo humano de nuestro equipo de guardia, solo escribe *#psicologo*.`;
   }
-  if (lower.includes('triste') || lower.includes('depre') || lower.includes('llorar') || lower.includes('desanimo') || lower.includes('solo') || lower.includes('sola')) {
-    return '💙 *Lamento mucho que estés atravesando este momento tan pesado.* Tus emociones son completamente válidas y no tienes que cargar con todo esto en soledad. Estoy aquí para acompañarte paso a paso. ¿Desde hace cuánto tiempo te vienes sintiendo así?';
+
+  // Tristeza, depresión, llanto, vacío, soledad
+  if (lower.includes('triste') || lower.includes('depre') || lower.includes('llorar') || lower.includes('desanimo') || lower.includes('desánimo') || lower.includes('solo') || lower.includes('sola') || lower.includes('vacio') || lower.includes('vacío') || lower.includes('soledad') || lower.includes('desesper')) {
+    return `${greeting}*lamento mucho que estés atravesando este momento tan doloroso y pesado.* Sentir ganas de llorar o experimentar ese vacío es completamente válido; no tienes que exigirle a tu mente estar bien de inmediato ni tienes que cargar esto en soledad.\n\nQuiero que sepas que este es un espacio seguro donde puedes desahogarte con total libertad. ¿Qué fue lo que detonó con más fuerza este sentimiento hoy? Recuerda que si deseas la atención de un psicólogo humano real, escribe *#psicologo*.`;
   }
-  if (lower.includes('dormir') || lower.includes('insomnio') || lower.includes('pesadilla') || lower.includes('cansado') || lower.includes('cansada')) {
-    return '🌙 *El descanso es fundamental para la salud emocional.* Cuando nos cuesta conciliar el sueño, suele ser reflejo de preocupaciones acumuladas. ¿Hay algún pensamiento en particular que no te deje desconectar esta noche?';
+
+  // Problemas de pareja, ruptura, desamor, celos
+  if (lower.includes('pareja') || lower.includes('novio') || lower.includes('novia') || lower.includes('esposo') || lower.includes('esposa') || lower.includes('terminamos') || lower.includes('engañ') || lower.includes('ruptura') || lower.includes('celos')) {
+    return `${greeting}*los procesos vinculares y las rupturas o conflictos de pareja tocan las fibras más sensibles de nuestra identidad.* Es natural sentir confusión, dolor en el pecho o una mezcla de apego y frustración.\n\nCuando las emociones hacia otra persona nos desbordan, el primer paso es volver a nosotras y nosotros mismos con compasión. ¿Sientes que esta situación está afectando tu tranquilidad en tu día a día? (Escribe *#psicologo* si deseas atención humana de guardia).`;
   }
-  if (lower.includes('gracias') || lower.includes('hola') || lower.includes('buenos') || lower.includes('buenas')) {
-    return '👋 *Hola, es un gusto saludarte.* Soy Aura, tu asistente de apoyo emocional de SubaTECH. ¿Cómo te encuentras hoy y en qué te gustaría que nos enfoquemos juntos?';
+
+  // Insomnio, problemas de sueño, agotamiento extremo
+  if (lower.includes('dormir') || lower.includes('insomnio') || lower.includes('pesadilla') || lower.includes('cansado') || lower.includes('cansada') || lower.includes('agotado') || lower.includes('desvelo')) {
+    return `${greeting}*el descanso es el pilar biológico de nuestra salud emocional.* Cuando llevamos tiempo con la mente sobrecargada, el cuerpo entra en tensión y no logra desconectar por la noche.\n\nPara esta noche, intenta soltar la exigencia de quedarte dormido(a) de inmediato. Simplemente permite que tu cuerpo repose sin juzgar tus pensamientos. ¿Hay alguna preocupación recurrente que esté dando vueltas en tu mente ahora mismo? (Si deseas hablar con un especialista de guardia, escribe *#psicologo*).`;
   }
-  return 'Entiendo lo que me compartes y quiero que sepas que este es un espacio seguro para expresarte. Cuéntame un poco más sobre lo que estás viviendo, o si lo prefieres, puedes solicitar atención directa con nuestro equipo de psicólogos humanos escribiendo *#psicologo*.';
+
+  // Enojo, rabia, frustración, ira
+  if (lower.includes('rabia') || lower.includes('ira') || lower.includes('enojo') || lower.includes('enojado') || lower.includes('enojada') || lower.includes('molesto') || lower.includes('frustrado') || lower.includes('frustrada') || lower.includes('bronca')) {
+    return `${greeting}*la rabia y la frustración son emociones muy intensas que nos señalan que un límite importante fue cruzado.* Es comprensible que sientas esa energía en el pecho o la mandíbula.\n\nEn lugar de reprimir el enojo, vamos a canalizarlo sin dañarte: toma una respiración profunda, suelta los puños y permítete nombrar exactamente qué te pareció injusto. ¿Qué causó este enojo hoy?`;
+  }
+
+  // Saludos y presentación
+  if (lower.includes('gracias') || lower.includes('hola') || lower.includes('buenos') || lower.includes('buenas') || lower.includes('que tal')) {
+    return `👋 ${greeting}*es un gusto saludarte.* Soy Aura, tu especialista de apoyo y contención emocional de SubaTECH Salud Mental Bogotá. Estoy aquí disponible para escucharte, orientarte y acompañarte en lo que necesites hoy.\n\n¿Cómo te has sentido en estos últimos días y en qué te gustaría que enfoquemos nuestra conversación? (Recuerda que si en algún momento deseas un profesional humano, escribe *#psicologo*).`;
+  }
+
+  // Respuesta reflexiva contextual personalizada
+  const snippet = prompt.length > 50 ? `${prompt.substring(0, 48)}...` : prompt;
+  return `${greeting}*te escucho con toda atención.* Cuando me cuentas que *"${snippet}"*, noto que hay un peso significativo detrás de tus palabras, y quiero felicitarte por tener la valentía de ponerlo en palabras.\n\nExpresar lo que vivimos es el primer paso para procesarlo. ¿Desde hace cuánto tiempo vienes sintiendo esto, y cómo te ha afectado en tu rutina diaria? Si prefieres continuar con un psicólogo humano del equipo de guardia, recuerda que solo debes escribir *#psicologo*.`;
 }
 
-// Call Gemini API with automatic retries for 503 / high demand resilience
-async function callGeminiWithRetry(prompt: string, contextMessages: ChatMessage[], retryCount = 0): Promise<string> {
+// Call Gemini API with model fallback hierarchy (gemini-3.1-flash-lite -> gemini-2.5-flash -> adaptive smart engine)
+async function callGeminiWithRetry(
+  prompt: string, 
+  contextMessages: ChatMessage[], 
+  session?: PatientSession,
+  retryCount = 0
+): Promise<string> {
   if (!process.env.GEMINI_API_KEY) {
-    return generateSmartClinicalResponse(prompt);
+    return generateSmartClinicalResponse(prompt, session);
   }
 
-  const MAX_RETRIES = 1; // Keep to 1 retry so response is always under Twilio 10-15s webhook timeout
-  try {
-    const formattedHistory = contextMessages.slice(-6).map(m => `${m.sender === 'user' ? 'Usuario' : 'Aura (IA)'}: ${m.text}`).join('\n');
-    const fullPrompt = `${formattedHistory}\nUsuario: ${prompt}\nAura:`;
+  const candidateModels = ['gemini-3.1-flash-lite', 'gemini-2.5-flash'];
+  const formattedHistory = contextMessages
+    .slice(-8)
+    .map(m => `${m.sender === 'user' ? (session?.userName || 'Paciente') : 'Aura (Psicóloga IA SubaTECH)'}: ${m.text}`)
+    .join('\n');
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: fullPrompt,
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        temperature: 0.7,
-      },
-    });
+  const fullPrompt = `DATOS DEL PACIENTE:
+- Nombre: ${session?.userName || 'Paciente'}
+- Teléfono: ${session?.phoneNumber || session?.id || 'No especificado'}
 
-    const reply = response.text?.trim();
-    if (reply) return reply;
-    throw new Error('Empty response from model');
-  } catch (error: any) {
-    console.error(`Gemini call failed (attempt ${retryCount + 1}):`, error?.message || error);
-    if (retryCount < MAX_RETRIES) {
-      await new Promise(r => setTimeout(r, 600));
-      return callGeminiWithRetry(prompt, contextMessages, retryCount + 1);
+HISTORIAL DE LA CONVERSACIÓN:
+${formattedHistory}
+
+NUEVO MENSAJE DEL PACIENTE:
+"${prompt}"
+
+Genera una respuesta personalizada, empática y terapéutica siguiendo las directrices de Aura:`;
+
+  for (const modelName of candidateModels) {
+    try {
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: fullPrompt,
+        config: {
+          systemInstruction: SYSTEM_INSTRUCTION,
+          temperature: 0.7,
+        },
+      });
+
+      const reply = response.text?.trim();
+      if (reply) {
+        return reply;
+      }
+    } catch (error: any) {
+      console.warn(`[Gemini Model ${modelName}] Attempt failed:`, error?.message || error);
     }
-    // Fallback response if API fails or quota exceeded
-    return generateSmartClinicalResponse(prompt);
   }
+
+  // If all external LLM attempts were exhausted or hit quota, use adaptive smart engine
+  return generateSmartClinicalResponse(prompt, session);
 }
 
 // Emergency Crisis Hotline Message
@@ -1020,7 +1044,8 @@ async function processIncomingWhatsAppMessage(
   session.lastActivityAt = now;
 
   // Add user message to history
-  const isCrisisTrigger = detectCrisisKeywords(text);
+  const crisisMatch = detectCrisisKeywords(text);
+  const isCrisisTrigger = crisisMatch.matched;
   const userMsg: ChatMessage = {
     id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
     sender: 'user',
@@ -1030,13 +1055,41 @@ async function processIncomingWhatsAppMessage(
   };
   session.messages.push(userMsg);
 
-  // Global Crisis Override Check
+  // Global Crisis Override Check (Matar, Suicidio, Crimen, Autolesion, Amenazas)
   if (isCrisisTrigger) {
     session.riskLevel = 'CRISIS';
     session.state = 'CRISIS_ALERT';
-    session.tags = Array.from(new Set([...session.tags, 'Alerta Roja', 'Crisis Detectada']));
-    session.triageSummary = `Alerta de seguridad activada automáticamente: "${text.substring(0, 100)}"`;
+    session.tags = Array.from(new Set([...session.tags, 'Alerta Roja', 'Crisis Detectada', crisisMatch.category || 'CRISIS']));
+    session.triageSummary = `[ALERTA AUTOMÁTICA ${crisisMatch.categoryDisplay || crisisMatch.category}] Palabra clave detectada: "${crisisMatch.keyword}". Mensaje: "${text.substring(0, 100)}"`;
     
+    // 1. Record in centralized error and incident log
+    recordSystemError({
+      service: 'GENERAL',
+      title: `🚨 Alerta de Crisis Activada: ${crisisMatch.categoryDisplay || crisisMatch.category}`,
+      details: `Paciente ${session.phoneNumber || session.id} activó alarma con la palabra "${crisisMatch.keyword}": "${text.substring(0, 150)}"`,
+      targetPhone: session.phoneNumber || session.id,
+      suggestion: crisisMatch.clinicalAdvice || 'Intervención de emergencia inmediata por parte del psicólogo de guardia.',
+    });
+
+    // 2. Dispatch immediate WhatsApp Alert to Admin (+573107956907)
+    const adminPhone = sanitizeWhatsAppNumber(ADMIN_NOTIFICATIONS_CONFIG.adminPhone);
+    if (adminPhone) {
+      const adminAlertMsg = [
+        `🚨 *[ALERTA DE CRISIS INMEDIATA - SUBATECH GUARDIA]*`,
+        `📱 *Paciente:* ${session.phoneNumber || session.id} (${session.userName || 'Anónimo'})`,
+        `⚠️ *Tipo de Riesgo:* ${crisisMatch.categoryDisplay || crisisMatch.category}`,
+        `📌 *Palabra Clave Activada:* "${crisisMatch.keyword}"`,
+        `💬 *Mensaje:* "${text.substring(0, 180)}"`,
+        `🕒 *Hora:* ${new Date().toLocaleTimeString('es-CO')}`,
+        `🚨 *Acción Automática:* Caso puesto en guardia prioritaria roja y líneas 106/192 entregadas al paciente.`,
+        `🔔 _Notificación despachada a ${adminPhone}._`
+      ].join('\n');
+      
+      sendTwilioWhatsAppMessage(adminPhone, adminAlertMsg).catch((err) => {
+        console.warn('[Crisis WhatsApp Alert] Could not dispatch alert to admin:', err);
+      });
+    }
+
     const reply = getCrisisResponseMessage(session.userName);
     const botMsg: ChatMessage = {
       id: `bot-${Date.now()}`,
@@ -1046,6 +1099,7 @@ async function processIncomingWhatsAppMessage(
       isCrisisTrigger: true,
     };
     session.messages.push(botMsg);
+    saveSessionsToFile();
     return { reply, session };
   }
 
@@ -1158,8 +1212,8 @@ Un terapeuta humano examinará tu caso y se comunicará directamente contigo en 
     };
   }
 
-  // Standard AI MODE: Patient chats with Aura (Gemini AI)
-  const aiReply = await callGeminiWithRetry(text, session.messages);
+  // Standard AI MODE: Patient chats with Aura (Gemini AI with model fallback hierarchy)
+  const aiReply = await callGeminiWithRetry(text, session.messages, session);
   const botMsg: ChatMessage = {
     id: `bot-${Date.now()}`,
     sender: 'bot',
@@ -1362,6 +1416,46 @@ const WEBHOOK_PATHS = ['/api/whatsapp', '/api/twilio/webhook', '/api/twilio', '/
 WEBHOOK_PATHS.forEach(path => {
   app.post(path, handleTwilioWebhook);
   app.get(path, handleTwilioWebhook);
+});
+
+// Status Callback handler for Twilio outbound delivery receipts (queued, sent, delivered, read, failed, undelivered)
+const handleTwilioStatusCallback = (req: express.Request, res: express.Response) => {
+  const params = req.method === 'GET' ? req.query : req.body;
+  const messageSid = params.MessageSid || params.SmsSid;
+  const messageStatus = params.MessageStatus || params.SmsStatus;
+  const to = params.To;
+  const errorCode = params.ErrorCode;
+  const errorMessage = params.ErrorMessage;
+
+  console.log(`[Twilio Status Callback] SID: ${messageSid}, Status: ${messageStatus}, To: ${to}${errorCode ? `, Error: ${errorCode} (${errorMessage})` : ''}`);
+
+  if (messageStatus === 'failed' || messageStatus === 'undelivered') {
+    recordSystemError({
+      service: 'TWILIO',
+      title: `Fallo de Entrega WhatsApp (${messageStatus})`,
+      details: errorMessage ? `Twilio Error ${errorCode}: ${errorMessage}` : `Mensaje saliente a ${to} no pudo ser entregado.`,
+      errorCode: errorCode ? Number(errorCode) : undefined,
+      targetPhone: to,
+      suggestion: errorCode === '63016'
+        ? 'La ventana de 24 horas de WhatsApp ha expirado; el paciente debe enviar un mensaje primero.'
+        : errorCode === '63007'
+        ? 'El canal de WhatsApp no se encontró en la cuenta de Twilio; activa el Sandbox en console.twilio.com.'
+        : 'Verifica que el número destino esté activo en WhatsApp.',
+    });
+  }
+
+  res.status(200).send('<Response/>');
+};
+
+const STATUS_CALLBACK_PATHS = [
+  '/api/twilio/status-callback',
+  '/api/whatsapp/status-callback',
+  '/twilio/status-callback',
+  '/whatsapp/status-callback'
+];
+STATUS_CALLBACK_PATHS.forEach(p => {
+  app.post(p, handleTwilioStatusCallback);
+  app.get(p, handleTwilioStatusCallback);
 });
 
 // Endpoint to view the last 20 requests received by the /api/whatsapp webhook
@@ -1690,6 +1784,58 @@ app.post('/api/admin/notifications/config', (req, res) => {
 app.post('/api/admin/notifications/test-report', async (req, res) => {
   const result = await generateAndSendPeriodicStatusReport();
   res.json(result);
+});
+
+// POST Dispatch Critical Alert immediately to Admin WhatsApp (+573107956907)
+app.post('/api/admin/notifications/alert', async (req, res) => {
+  const { service, title, details, errorCode, suggestion, phone } = req.body;
+  const targetPhone = phone || ADMIN_NOTIFICATIONS_CONFIG.adminPhone || 'whatsapp:+573107956907';
+  
+  // 1. Record in centralized system error log
+  const log = recordSystemError({
+    service: service || 'GENERAL',
+    title: title || 'Alerta Crítica del Sistema',
+    details: details || 'Detalle de error no especificado',
+    errorCode,
+    suggestion,
+    targetPhone: targetPhone !== ADMIN_NOTIFICATIONS_CONFIG.adminPhone ? targetPhone : undefined,
+  });
+
+  // 2. Dispatch WhatsApp message to target phone (+573107956907)
+  const target = sanitizeWhatsAppNumber(targetPhone);
+  if (!target) {
+    return res.status(400).json({ success: false, error: 'Número destino inválido', log });
+  }
+
+  const alertMessage = [
+    `🚨 *[ALERTA CRÍTICA - SUBATECH SISTEMA]*`,
+    `⚠️ *Servicio:* ${service || 'GENERAL'}`,
+    `📌 *Error:* ${title || 'Error detectado'}`,
+    errorCode ? `🔢 *Código:* ${errorCode}` : '',
+    `📝 *Detalle:* ${String(details || '').substring(0, 300)}`,
+    suggestion ? `💡 *Sugerencia:* ${suggestion}` : '',
+    `🕒 *Hora:* ${new Date().toLocaleTimeString('es-CO')}`,
+    `🔔 _Alerta automática despachada a ${target}._`
+  ].filter(Boolean).join('\n');
+
+  console.log(`[Critical Alert API] Sending urgent WhatsApp alert to ${target}...`);
+  try {
+    const twilioResult = await sendTwilioWhatsAppMessage(target, alertMessage);
+    return res.json({
+      success: true,
+      log,
+      whatsappDispatched: twilioResult.success,
+      twilioSid: twilioResult.sid,
+      error: twilioResult.error
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      log,
+      whatsappDispatched: false,
+      error: err?.message || 'Fallo de red al enviar WhatsApp'
+    });
+  }
 });
 
 // POST Verify Twilio credentials directly with Twilio Account API without sending an SMS

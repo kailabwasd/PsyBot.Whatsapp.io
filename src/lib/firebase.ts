@@ -25,6 +25,7 @@ import type { PsychologistAuthUser } from '../types/index.ts';
 import { encryptSecret, decryptSecret } from './cryptoUtils.ts';
 import { generateSecret, generateURI, verifySync } from 'otplib';
 import qrcode from 'qrcode';
+import { reportFirestoreCriticalError } from '../services/api.ts';
 
 // Initialize Firebase App
 export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
@@ -167,9 +168,12 @@ export async function savePsychologistProfile(profile: PsychologistAuthUser): Pr
     }
 
     const userDocRef = doc(db, 'psychologists', profile.uid);
-    setDoc(userDocRef, firestorePayload, { merge: true }).catch(() => {});
-  } catch (error) {
+    setDoc(userDocRef, firestorePayload, { merge: true }).catch((err) => {
+      reportFirestoreCriticalError(err, 'Sincronizar Perfil de Psicólogo en Firestore', `UID: ${profile.uid}`).catch(() => {});
+    });
+  } catch (error: any) {
     console.warn('Could not sync psychologist profile to Firestore:', error);
+    reportFirestoreCriticalError(error, 'Error al procesar Perfil de Psicólogo para Firestore', `UID: ${profile.uid}`).catch(() => {});
   }
 
   localStorage.setItem('psybot_psychologist_session', JSON.stringify(updatedProfile));
@@ -438,8 +442,9 @@ export async function listPsychologistsFromFirestore(): Promise<PsychologistAuth
       list.unshift(createAdminProfile('kailabwasd@gmail.com', 'Kailabwasd Owner', undefined));
     }
     return list;
-  } catch (err) {
+  } catch (err: any) {
     console.warn('Could not fetch psychologists list, using local cache:', err);
+    reportFirestoreCriticalError(err, 'Listar Psicólogos desde Firestore', 'psychologists').catch(() => {});
     return [createAdminProfile('kailabwasd@gmail.com', 'Kailabwasd Owner', undefined)];
   }
 }

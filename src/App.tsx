@@ -219,6 +219,34 @@ export default function App() {
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
 
+  // Smart auto-hide Header when scrolling down, reveal on scroll up
+  const [isHeaderVisible, setIsHeaderVisible] = useState(true);
+  const lastScrollYRef = useRef(0);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      // Always show header near top
+      if (currentScrollY <= 40) {
+        setIsHeaderVisible(true);
+        lastScrollYRef.current = currentScrollY;
+        return;
+      }
+      // Scrolling down -> hide header
+      if (currentScrollY > lastScrollYRef.current + 12) {
+        setIsHeaderVisible(false);
+      } 
+      // Scrolling up -> show header
+      else if (currentScrollY < lastScrollYRef.current - 8) {
+        setIsHeaderVisible(true);
+      }
+      lastScrollYRef.current = currentScrollY;
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
   const checkNavScroll = () => {
     if (navContainerRef.current) {
       const { scrollLeft, scrollWidth, clientWidth } = navContainerRef.current;
@@ -865,8 +893,10 @@ export default function App() {
   return (
     <div className={getThemeClasses()}>
       
-      {/* 1 & 2. Fixed/Sticky Header and Navigation Suite (Never hidden when scrolling) */}
-      <div className="sticky top-0 z-40 w-full shadow-md">
+      {/* 1 & 2. Fixed/Sticky Header and Navigation Suite (Auto-hides smoothly on scroll down) */}
+      <div className={`sticky top-0 z-40 w-full transition-transform duration-300 ease-in-out ${
+        isHeaderVisible ? 'translate-y-0 shadow-md' : '-translate-y-full shadow-none'
+      }`}>
         {/* 1. Global Header (GOV.CO + Alcaldía Mayor de Bogotá D.C.) */}
         <Header
           currentUser={currentUser}

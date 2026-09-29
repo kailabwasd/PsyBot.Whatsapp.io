@@ -79,6 +79,30 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
   const [showGithubSelector, setShowGithubSelector] = useState(false);
   const [showAccessibility, setShowAccessibility] = useState(false);
 
+  // Smart auto-hide Header when scrolling down on the page, reveal on scroll up
+  const [isHeaderVisible, setIsHeaderVisible] = useState(true);
+  const lastScrollYRef = React.useRef(0);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      if (currentScrollY <= 40) {
+        setIsHeaderVisible(true);
+        lastScrollYRef.current = currentScrollY;
+        return;
+      }
+      if (currentScrollY > lastScrollYRef.current + 12) {
+        setIsHeaderVisible(false);
+      } else if (currentScrollY < lastScrollYRef.current - 8) {
+        setIsHeaderVisible(true);
+      }
+      lastScrollYRef.current = currentScrollY;
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
   // Sync auth modal visibility with URL route changes
   useEffect(() => {
     if (initialAuthMode === 'LOGIN') {
@@ -358,50 +382,51 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
   return (
     <div className="min-h-screen bg-[#F0F4F8] text-slate-900 font-bold flex flex-col font-sans selection:bg-amber-200 selection:text-slate-900">
       
-      {/* 1. Top Banner Institucional: GOV.CO y Alcaldía Mayor de Bogotá D.C. */}
-      <div className="bg-[#0B2545] border-b border-slate-800 text-xs text-slate-200 py-2.5 px-4 sm:px-8 shadow-sm">
-        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <a 
-              href="https://www.gov.co" 
-              target="_blank" 
-              rel="noreferrer"
-              className="font-bold text-[#FFC800] tracking-wider uppercase text-[11px] hover:underline flex items-center gap-1"
-            >
-              <span>GOV.CO</span>
-              <span className="w-1.5 h-1.5 rounded-full bg-[#FFC800]"></span>
-            </a>
-            <span className="text-slate-400">·</span>
-            <span className="text-slate-100 font-semibold text-[11px] sm:text-xs">
-              Alcaldía Mayor de Bogotá D.C. · Secretaría Distrital de Salud
-            </span>
-          </div>
+      {/* 1. Header Suite Sticky (Auto-hides smoothly on scroll down) */}
+      <div className={`sticky top-0 z-40 w-full transition-transform duration-300 ease-in-out ${
+        isHeaderVisible ? 'translate-y-0 shadow-md' : '-translate-y-full shadow-none'
+      }`}>
+        {/* Top Banner Institucional: GOV.CO y Alcaldía Mayor de Bogotá D.C. */}
+        <div className="bg-[#0B2545] border-b border-slate-800 text-xs text-slate-200 py-2.5 px-4 sm:px-8 shadow-sm">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <a 
+                href="https://www.gov.co" 
+                target="_blank" 
+                rel="noreferrer"
+                className="font-bold text-[#FFC800] tracking-wider uppercase text-[11px] hover:underline flex items-center gap-1"
+              >
+                <span>GOV.CO</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-[#FFC800]"></span>
+              </a>
+              <span className="text-slate-400">·</span>
+              <span className="text-slate-100 font-semibold text-[11px] sm:text-xs">
+                Alcaldía Mayor de Bogotá D.C. · Secretaría Distrital de Salud
+              </span>
+            </div>
 
-          <div className="flex items-center gap-4 text-[11px] text-slate-300">
-            <a 
-              href={GOOGLE_DRIVE_FOLDER_URL} 
-              target="_blank" 
-              rel="noreferrer"
-              className="text-cyan-200 hover:text-white flex items-center gap-1 underline font-semibold transition"
-            >
-              <ExternalLink className="w-3 h-3" />
-              <span>Google Drive del Proyecto</span>
-            </a>
-            <span className="hidden sm:inline">·</span>
-            <span className="text-emerald-300 font-medium flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
-              Guardia Psicológica Activa 24/7
-            </span>
+            <div className="flex items-center gap-4 text-[11px] text-slate-300">
+              <a 
+                href={GOOGLE_DRIVE_FOLDER_URL} 
+                target="_blank" 
+                rel="noreferrer"
+                className="text-cyan-200 hover:text-white flex items-center gap-1 underline font-semibold transition"
+              >
+                <ExternalLink className="w-3 h-3" />
+                <span>Google Drive del Proyecto</span>
+              </a>
+              <span className="hidden sm:inline">·</span>
+              <span className="text-emerald-300 font-medium flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                Guardia Psicológica Activa 24/7
+              </span>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* 2. Hero & Contenido Institucional Principal */}
-      <div className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col justify-between space-y-8">
-        
-        {/* Header y Botones de Acción de Acceso */}
-        <div className="space-y-6 pt-4">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-4 border-b border-slate-300">
+        {/* Top Header Bar con Logo y Accesos */}
+        <div className="bg-white/95 backdrop-blur-md border-b border-slate-200 py-3 px-4 sm:px-6 lg:px-8">
+          <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-4">
               <SubaTechLogo size="lg" showTagline={true} />
             </div>
@@ -462,7 +487,14 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
               </button>
             </div>
           </div>
+        </div>
+      </div>
 
+      {/* 2. Hero & Contenido Institucional Principal */}
+      <div className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col justify-between space-y-8">
+        
+        {/* Contenido Principal & Alertas */}
+        <div className="space-y-6 pt-2">
           {/* Banner de ruta protegida si intentó ingresar a un sub-dominio protegido */}
           {protectedRouteAttempted && (
             <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-2xl text-xs text-amber-900 flex items-center justify-between gap-3 animate-in fade-in shadow-sm">

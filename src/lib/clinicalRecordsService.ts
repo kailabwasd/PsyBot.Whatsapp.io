@@ -11,6 +11,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import type { ClinicalRecord, PatientSession } from '../types';
+import { reportFirestoreCriticalError } from '../services/api.ts';
 
 const RECORDS_COLLECTION = 'clinical_records';
 
@@ -78,19 +79,31 @@ const DEFAULT_DEMOGRAPHICS: Record<string, { age: number; gender: string; emerge
  * Save or update a ClinicalRecord in Firestore
  */
 export async function saveClinicalRecordToFirestore(record: ClinicalRecord): Promise<void> {
-  const docRef = doc(db, RECORDS_COLLECTION, record.id);
-  await setDoc(docRef, {
-    ...record,
-    lastUpdated: Date.now(),
-  }, { merge: true });
+  try {
+    const docRef = doc(db, RECORDS_COLLECTION, record.id);
+    await setDoc(docRef, {
+      ...record,
+      lastUpdated: Date.now(),
+    }, { merge: true });
+  } catch (err: any) {
+    console.error('Error saving clinical record to Firestore:', err);
+    reportFirestoreCriticalError(err, 'Guardar Registro Clínico', `ID: ${record.id}`).catch(() => {});
+    throw err;
+  }
 }
 
 /**
  * Delete a ClinicalRecord from Firestore
  */
 export async function deleteClinicalRecordFromFirestore(recordId: string): Promise<void> {
-  const docRef = doc(db, RECORDS_COLLECTION, recordId);
-  await deleteDoc(docRef);
+  try {
+    const docRef = doc(db, RECORDS_COLLECTION, recordId);
+    await deleteDoc(docRef);
+  } catch (err: any) {
+    console.error('Error deleting clinical record from Firestore:', err);
+    reportFirestoreCriticalError(err, 'Eliminar Registro Clínico', `ID: ${recordId}`).catch(() => {});
+    throw err;
+  }
 }
 
 /**
@@ -175,8 +188,9 @@ export async function saveActiveSessionToFirestore(session: PatientSession): Pro
       ...session,
       lastActivityAt: Date.now(),
     }, { merge: true });
-  } catch (err) {
+  } catch (err: any) {
     console.error('Error saving active session to Firestore:', err);
+    reportFirestoreCriticalError(err, 'Guardar Sesión Activa', `Sesión: ${session.id}`).catch(() => {});
   }
 }
 
@@ -188,8 +202,9 @@ export async function getActiveSessionsFromFirestore(): Promise<PatientSession[]
     const q = query(collection(db, SESSIONS_COLLECTION), orderBy('lastActivityAt', 'desc'));
     const snapshot = await getDocs(q);
     return snapshot.docs.map((docSnap) => docSnap.data() as PatientSession);
-  } catch (err) {
+  } catch (err: any) {
     console.error('Error fetching active sessions from Firestore:', err);
+    reportFirestoreCriticalError(err, 'Cargar Sesiones Activas desde Firestore', SESSIONS_COLLECTION).catch(() => {});
     return [];
   }
 }
@@ -204,6 +219,7 @@ export function subscribeToActiveSessions(callback: (sessions: PatientSession[])
     callback(sessions);
   }, (error) => {
     console.warn('Active sessions subscription warning:', error);
+    reportFirestoreCriticalError(error, 'Suscripción en Tiempo Real Firestore (Snapshot)', SESSIONS_COLLECTION).catch(() => {});
   });
 }
 
