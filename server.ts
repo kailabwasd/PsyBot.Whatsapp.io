@@ -183,11 +183,17 @@ function validateEnvironmentVariables() {
   };
 }
 
+// Helper: Clean credentials by removing quotes, whitespace, and invisible characters
+function cleanCredential(val: string | undefined | null): string {
+  if (!val || typeof val !== 'string') return '';
+  return val.trim().replace(/^["']|["']$/g, '').trim();
+}
+
 // Twilio WhatsApp credentials
 const TWILIO_CONFIG = {
-  accountSid: process.env.TWILIO_ACCOUNT_SID || 'ACe13be538d71e3ac31fd56bbdf7d86902',
-  authToken: process.env.TWILIO_AUTH_TOKEN || '16c6e19e2aefea46ff4104cdb5077eb5',
-  whatsappNumber: process.env.TWILIO_WHATSAPP_NUMBER || 'whatsapp:+14155238886',
+  accountSid: cleanCredential(process.env.TWILIO_ACCOUNT_SID) || 'ACe13be538d71e3ac31fd56bbdf7d86902',
+  authToken: cleanCredential(process.env.TWILIO_AUTH_TOKEN) || '16c6e19e2aefea46ff4104cdb5077eb5',
+  whatsappNumber: cleanCredential(process.env.TWILIO_WHATSAPP_NUMBER) || 'whatsapp:+14155238886',
 };
 
 // Helper: Sanitize and validate phone numbers for Twilio WhatsApp format (e.g. +573107956907 -> whatsapp:+573107956907)
@@ -1515,13 +1521,85 @@ app.post('/api/admin/error-logs/record', (req, res) => {
   res.json({ success: true, log: newLog });
 });
 
+// POST Verify Twilio credentials directly with Twilio Account API without sending an SMS
+app.post('/api/twilio/verify-credentials', async (req, res) => {
+  const { accountSid, authToken } = req.body;
+  const sid = cleanCredential(accountSid) || TWILIO_CONFIG.accountSid;
+  const token = cleanCredential(authToken) || TWILIO_CONFIG.authToken;
+
+  if (!sid || !token) {
+    return res.status(400).json({
+      success: false,
+      error: 'Se requiere Account SID y Auth Token para verificar la cuenta.',
+    });
+  }
+
+  try {
+    const authString = Buffer.from(`${sid}:${token}`).toString('base64');
+    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${sid}.json`;
+
+    console.log(`[Twilio Verify] Testing account credentials for SID: ${sid.substring(0, 6)}...`);
+    const response = await fetch(twilioUrl, {
+      headers: {
+        'Authorization': `Basic ${authString}`,
+        'Accept': 'application/json',
+      },
+    });
+
+    const data: any = await response.json();
+
+    if (response.ok) {
+      // Save valid verified credentials into runtime memory
+      TWILIO_CONFIG.accountSid = sid;
+      TWILIO_CONFIG.authToken = token;
+
+      return res.json({
+        success: true,
+        accountSid: sid,
+        friendlyName: data.friendly_name,
+        status: data.status,
+        type: data.type,
+        message: `✅ Credenciales de Twilio verificadas y válidas con éxito. Cuenta: "${data.friendly_name}" (${data.status}).`,
+      });
+    } else {
+      const is401 = response.status === 401 || data.code === 20003;
+      recordSystemError({
+        service: 'TWILIO',
+        title: is401 ? 'Twilio Error 20003 (401 Unauthorized)' : `Twilio Error ${data.code || response.status}`,
+        details: data.message || 'Fallo de autenticación con la cuenta de Twilio',
+        errorCode: data.code || response.status,
+        statusCode: response.status,
+        suggestion: is401 
+          ? 'El token no corresponde a esta cuenta. Verifica si regeneraste el Auth Token en Twilio Console o si tienes varios proyectos abiertos en Twilio.'
+          : undefined,
+      });
+
+      return res.status(response.status).json({
+        success: false,
+        errorCode: data.code || response.status,
+        message: data.message || 'Error de autenticación en Twilio',
+        rawResponse: data,
+        moreInfo: data.more_info,
+        advice: is401
+          ? 'Twilio rechazó la combinación de Account SID y Auth Token. Asegúrate de copiar el Auth Token vigente desde console.twilio.com (sección Account Info -> Auth Token -> Show).'
+          : undefined,
+      });
+    }
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err.message || 'Error de red al conectar con api.twilio.com',
+    });
+  }
+});
+
 app.post('/api/twilio/config', (req, res) => {
   const { accountSid, authToken, whatsappNumber } = req.body;
-  if (accountSid) TWILIO_CONFIG.accountSid = accountSid.trim();
-  if (authToken) TWILIO_CONFIG.authToken = authToken.trim();
+  if (accountSid) TWILIO_CONFIG.accountSid = cleanCredential(accountSid);
+  if (authToken) TWILIO_CONFIG.authToken = cleanCredential(authToken);
   if (whatsappNumber) {
-    const formatted = sanitizeWhatsAppNumber(whatsappNumber);
-    TWILIO_CONFIG.whatsappNumber = formatted || whatsappNumber.trim();
+    const formatted = sanitizeWhatsAppNumber(cleanCredential(whatsappNumber));
+    TWILIO_CONFIG.whatsappNumber = formatted || cleanCredential(whatsappNumber);
   }
 
   res.json({
@@ -1546,11 +1624,11 @@ app.post('/api/twilio/test', async (req, res) => {
   }
 
   // Update in-memory credentials if passed in the test request
-  if (accountSid) TWILIO_CONFIG.accountSid = accountSid.trim();
-  if (authToken) TWILIO_CONFIG.authToken = authToken.trim();
+  if (accountSid) TWILIO_CONFIG.accountSid = cleanCredential(accountSid);
+  if (authToken) TWILIO_CONFIG.authToken = cleanCredential(authToken);
   if (whatsappNumber) {
-    const formatted = sanitizeWhatsAppNumber(whatsappNumber);
-    TWILIO_CONFIG.whatsappNumber = formatted || whatsappNumber.trim();
+    const formatted = sanitizeWhatsAppNumber(cleanCredential(whatsappNumber));
+    TWILIO_CONFIG.whatsappNumber = formatted || cleanCredential(whatsappNumber);
   }
 
   const messageText = testMessage || '🟢 ¡Conexión con Psybot SubaTECH confirmada! Tu WhatsApp está vinculado exitosamente con la Guardia de Salud Mental 24/7.';

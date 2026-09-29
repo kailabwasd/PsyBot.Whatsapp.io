@@ -52,7 +52,8 @@ import {
   clearSystemErrorLogs, 
   fetchTwilioConfig, 
   updateTwilioConfig, 
-  testTwilioConnection 
+  testTwilioConnection,
+  verifyTwilioCredentials
 } from '../services/api.ts';
 
 interface SettingsModalProps {
@@ -136,6 +137,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     errorCode?: number;
     sid?: string;
     suggestion?: string;
+  } | null>(null);
+
+  // Direct Account Verification State
+  const [isVerifyingCredentials, setIsVerifyingCredentials] = useState(false);
+  const [verifyCredentialsResult, setVerifyCredentialsResult] = useState<{
+    success?: boolean;
+    friendlyName?: string;
+    status?: string;
+    message?: string;
+    error?: string;
+    errorCode?: number;
+    advice?: string;
   } | null>(null);
 
   const isOwner = currentUser.email === 'kailabwasd@gmail.com' || currentUser.isAdmin;
@@ -222,6 +235,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       });
     } finally {
       setIsTestingTwilio(false);
+    }
+  };
+
+  const handleVerifyCredentials = async () => {
+    setIsVerifyingCredentials(true);
+    setVerifyCredentialsResult(null);
+    try {
+      const res = await verifyTwilioCredentials(twilioAccountSid, twilioAuthToken);
+      setVerifyCredentialsResult(res);
+      if (res.success) {
+        setHasTwilioAuthToken(true);
+      }
+      const updatedLogs = await fetchSystemErrorLogs();
+      setErrorLogs(updatedLogs);
+    } catch (err: any) {
+      setVerifyCredentialsResult({
+        success: false,
+        error: err.message || 'Error de conexión al verificar credenciales con Twilio',
+      });
+    } finally {
+      setIsVerifyingCredentials(false);
     }
   };
 
@@ -1591,7 +1625,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     />
                   </div>
 
-                  <div className="sm:col-span-3 flex justify-end pt-1">
+                  <div className="sm:col-span-3 flex flex-wrap items-center justify-between gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={handleVerifyCredentials}
+                      disabled={isVerifyingCredentials}
+                      className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-cyan-300 border border-cyan-500/30 hover:border-cyan-500/50 font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer shadow disabled:opacity-50"
+                      title="Prueba la combinación de Account SID y Auth Token directamente contra api.twilio.com sin enviar ningún mensaje de texto."
+                    >
+                      {isVerifyingCredentials ? <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-400" /> : <Activity className="w-3.5 h-3.5 text-cyan-400" />}
+                      <span>Verificar Cuenta con Twilio (Sin SMS)</span>
+                    </button>
+
                     <button
                       type="submit"
                       disabled={isSavingTwilio}
@@ -1602,6 +1647,44 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </button>
                   </div>
                 </form>
+
+                {/* Direct Verification Result Banner */}
+                {verifyCredentialsResult && (
+                  <div className={`p-4 rounded-xl border text-xs space-y-2 animate-in fade-in ${
+                    verifyCredentialsResult.success
+                      ? 'bg-emerald-950/70 border-emerald-500/50 text-emerald-200'
+                      : 'bg-red-950/80 border-red-500/50 text-red-200'
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold flex items-center gap-2">
+                        {verifyCredentialsResult.success ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        ) : (
+                          <ShieldAlert className="w-4 h-4 text-red-400 shrink-0" />
+                        )}
+                        <span>{verifyCredentialsResult.success ? 'Autenticación Válida con Twilio' : 'Fallo de Autenticación Twilio (401)'}</span>
+                      </span>
+                      {verifyCredentialsResult.errorCode && (
+                        <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-red-900/60 text-red-300 font-bold">
+                          Error {verifyCredentialsResult.errorCode}
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="text-[11px] leading-relaxed">
+                      {verifyCredentialsResult.message || verifyCredentialsResult.error}
+                    </p>
+
+                    {verifyCredentialsResult.advice && (
+                      <div className="p-2.5 rounded-lg bg-slate-900/90 border border-amber-500/30 text-amber-200 text-[11px] space-y-1">
+                        <strong className="text-amber-300 flex items-center gap-1">
+                          <HelpCircle className="w-3.5 h-3.5 text-amber-400" /> Diagnóstico Oficial:
+                        </strong>
+                        <p>{verifyCredentialsResult.advice}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Live Twilio Test Dispatcher */}
                 <div className="pt-3 border-t border-slate-800/80 space-y-3">

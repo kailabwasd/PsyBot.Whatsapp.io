@@ -425,3 +425,27 @@ export async function testTwilioConnection(params: {
     };
   });
 }
+
+export async function verifyTwilioCredentials(
+  accountSid?: string,
+  authToken?: string
+): Promise<{
+  success: boolean;
+  accountSid?: string;
+  friendlyName?: string;
+  status?: string;
+  message?: string;
+  error?: string;
+  errorCode?: number;
+  advice?: string;
+  rawResponse?: any;
+}> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/twilio/verify-credentials`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accountSid, authToken }),
+  });
+  return res.json();
+}
+
