@@ -394,13 +394,16 @@ export async function sendPsychologistMessage(
       body: JSON.stringify({ sessionId, text, psychologistName }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.success === false || data.twilioDelivery?.success === false) {
-      const errorMsg = data.error || data.twilioDelivery?.error || `Error ${res.status}: Fallo al despachar mensaje a WhatsApp`;
+    if (!res.ok || data.success === false) {
+      const errorMsg = data.error || `Error ${res.status}: Fallo al registrar mensaje`;
       const err: any = new Error(errorMsg);
       err.status = res.status;
       err.errorCode = data.errorCode || data.twilioDelivery?.errorCode;
       err.session = data.session;
       throw err;
+    }
+    if (data.session && data.twilioDelivery && data.twilioDelivery.success === false) {
+      (data.session as any).twilioDeliveryError = data.twilioDelivery.error || data.warning;
     }
     return data.session;
   }, { 

@@ -23,10 +23,23 @@ import {
   BrainCircuit,
   Info,
   Archive,
-  MessageSquare
+  MessageSquare,
+  Settings,
+  KeyRound,
+  Check,
+  X,
+  Eye,
+  EyeOff,
+  Radio
 } from 'lucide-react';
 import type { PatientSession, PsychologistProfile, RiskLevel } from '../types/index.ts';
-import { sendDirectTwilioWhatsApp } from '../services/api.ts';
+import { 
+  sendDirectTwilioWhatsApp, 
+  fetchTwilioConfig, 
+  updateTwilioConfig, 
+  verifyTwilioCredentials, 
+  testTwilioConnection 
+} from '../services/api.ts';
 import { exportSessionSummaryToPDF } from '../lib/pdfExportService.ts';
 
 interface PatientSentiment {
@@ -115,6 +128,19 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
   const [copiedRecordLink, setCopiedRecordLink] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [pdfSuccessMessage, setPdfSuccessMessage] = useState<string | null>(null);
+
+  // Quick Twilio WhatsApp Connection Modal State
+  const [twilioModalOpen, setTwilioModalOpen] = useState(false);
+  const [twAccountSid, setTwAccountSid] = useState('');
+  const [twAuthToken, setTwAuthToken] = useState('');
+  const [twWhatsappNumber, setTwWhatsappNumber] = useState('whatsapp:+14155238886');
+  const [showAuthToken, setShowAuthToken] = useState(false);
+  const [hasServerAuthToken, setHasServerAuthToken] = useState(false);
+  const [isSavingTwilio, setIsSavingTwilio] = useState(false);
+  const [twilioSaveMessage, setTwilioSaveMessage] = useState<{ success: boolean; text: string } | null>(null);
+  const [twTestPhone, setTwTestPhone] = useState('');
+  const [isSendingTest, setIsSendingTest] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; text: string } | null>(null);
   
   // Gemini Patient Sentiment State
   const [sentiment, setSentiment] = useState<PatientSentiment | null>(null);
@@ -264,6 +290,100 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
     }
   };
 
+  const handleOpenTwilioModal = async () => {
+    setTwilioModalOpen(true);
+    setTwilioSaveMessage(null);
+    setTestResult(null);
+    try {
+      const cfg = await fetchTwilioConfig();
+      if (cfg.accountSid) setTwAccountSid(cfg.accountSid);
+      if (cfg.whatsappNumber) setTwWhatsappNumber(cfg.whatsappNumber);
+      setHasServerAuthToken(Boolean(cfg.hasAuthToken));
+      if (currentSession?.phoneNumber && currentSession.phoneNumber.startsWith('+')) {
+        setTwTestPhone(currentSession.phoneNumber);
+      } else {
+        setTwTestPhone('+573107956907');
+      }
+    } catch (e) {
+      console.warn('Error fetching Twilio config:', e);
+    }
+  };
+
+  const handleSaveTwilioConfig = async () => {
+    if (!twAccountSid.trim()) {
+      setTwilioSaveMessage({ success: false, text: 'Debes ingresar el Account SID de Twilio (empieza con AC...)' });
+      return;
+    }
+    setIsSavingTwilio(true);
+    setTwilioSaveMessage(null);
+    try {
+      // 1. Verify credentials with Twilio REST API
+      const verify = await verifyTwilioCredentials(twAccountSid.trim(), twAuthToken.trim() || undefined);
+      if (!verify.success) {
+        setTwilioSaveMessage({
+          success: false,
+          text: verify.message || verify.error || 'Credenciales inválidas en Twilio (401 Unauthorized).'
+        });
+        setIsSavingTwilio(false);
+        return;
+      }
+
+      // 2. Update config on server and persist
+      const updateRes = await updateTwilioConfig({
+        accountSid: twAccountSid.trim(),
+        authToken: twAuthToken.trim() || undefined,
+        whatsappNumber: twWhatsappNumber.trim()
+      });
+
+      if (updateRes.success) {
+        setHasServerAuthToken(Boolean(updateRes.hasAuthToken));
+        setTwilioSaveMessage({
+          success: true,
+          text: `✅ ¡Conexión con Twilio verificada y guardada! Cuenta: ${verify.friendlyName || twAccountSid}`
+        });
+        setSendError(null);
+      }
+    } catch (err: any) {
+      setTwilioSaveMessage({ success: false, text: err?.message || 'Error guardando credenciales de Twilio.' });
+    } finally {
+      setIsSavingTwilio(false);
+    }
+  };
+
+  const handleSendTestWhatsApp = async () => {
+    if (!twTestPhone.trim()) {
+      setTestResult({ success: false, text: 'Ingresa un número de WhatsApp destino (ej. +573107956907)' });
+      return;
+    }
+    setIsSendingTest(true);
+    setTestResult(null);
+    try {
+      const res = await testTwilioConnection({
+        toPhone: twTestPhone.trim(),
+        testMessage: `🩺 *SubaTECH PsyBot* | Mensaje de prueba de conexión en vivo con el psicólogo ${currentSpecialist.name}. ¡Conexión operativa!`,
+        accountSid: twAccountSid.trim() || undefined,
+        authToken: twAuthToken.trim() || undefined,
+        whatsappNumber: twWhatsappNumber.trim() || undefined,
+      });
+
+      if (res.success) {
+        setTestResult({
+          success: true,
+          text: `✅ ¡Mensaje entregado con éxito a ${twTestPhone}! (SID: ${res.sid || 'OK'})`
+        });
+      } else {
+        setTestResult({
+          success: false,
+          text: res.error || 'Twilio no pudo despachar el mensaje. Revisa si el número destino envió "join <palabra>" al +1 415 523 8886.'
+        });
+      }
+    } catch (err: any) {
+      setTestResult({ success: false, text: err?.message || 'Error en prueba de envío a WhatsApp.' });
+    } finally {
+      setIsSendingTest(false);
+    }
+  };
+
   const handleApplyPreset = (presetText: string) => {
     setInputText(presetText);
   };
@@ -391,6 +511,16 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
 
             {/* Quick Chat Actions */}
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleOpenTwilioModal}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-emerald-300 hover:text-white bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-500/40 flex items-center gap-1.5 transition shadow-sm cursor-pointer"
+                title="Configurar y Probar Conexión Twilio WhatsApp"
+              >
+                <Radio className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden sm:inline">Conexión Twilio</span>
+              </button>
+
               <button
                 type="button"
                 onClick={handleDownloadSessionPdf}
@@ -657,10 +787,16 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
                   {isPsychologist && (
                     <div className="mt-1 flex items-center justify-end gap-1 text-[10px]">
                       {msg.deliveryStatus === 'failed' ? (
-                        <div className="flex items-center gap-1 text-red-200 bg-red-950/80 px-1.5 py-0.5 rounded border border-red-500/40 text-[9px]" title={msg.deliveryError || 'Error de entrega en Twilio'}>
+                        <button 
+                          type="button"
+                          onClick={handleOpenTwilioModal}
+                          className="flex items-center gap-1 text-red-200 bg-red-950/90 hover:bg-red-900 px-2 py-0.5 rounded border border-red-500/40 text-[9px] cursor-pointer transition"
+                          title={msg.deliveryError || 'Error de entrega en Twilio. Clic para configurar'}
+                        >
                           <AlertTriangle className="w-2.5 h-2.5 text-red-400 shrink-0" />
-                          <span className="truncate max-w-[180px]">{msg.deliveryError || 'No entregado'}</span>
-                        </div>
+                          <span className="truncate max-w-[170px]">{msg.deliveryError || 'No entregado'}</span>
+                          <span className="underline ml-0.5 font-bold">Configurar</span>
+                        </button>
                       ) : (
                         <div className="flex items-center gap-0.5 text-teal-200/90 text-[10px]">
                           <CheckCircle className="w-3 h-3 text-emerald-300" />
@@ -677,27 +813,48 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
 
         {/* Twilio Outbound Delivery Alerts / Notice */}
         {sendError && (
-          <div className="px-4 py-2 bg-red-950/90 border-t border-red-500/50 text-xs text-red-200 flex items-center justify-between animate-in fade-in shrink-0">
-            <div className="flex items-center gap-2">
+          <div className="px-4 py-2.5 bg-red-950/90 border-t border-red-500/50 text-xs text-red-200 flex flex-wrap items-center justify-between gap-2 animate-in fade-in shrink-0">
+            <div className="flex items-center gap-2 max-w-[75%]">
               <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
               <span><strong>Aviso Twilio:</strong> {sendError}</span>
             </div>
-            <button
-              onClick={() => setSendError(null)}
-              className="text-xs text-red-300 hover:text-white px-2 py-0.5 rounded bg-red-900/40"
-            >
-              Cerrar
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleOpenTwilioModal}
+                className="text-xs bg-red-800 hover:bg-red-700 text-white font-semibold px-2.5 py-1 rounded transition cursor-pointer flex items-center gap-1 shadow-sm"
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                <span>Solucionar Conexión Twilio</span>
+              </button>
+              <button
+                onClick={() => setSendError(null)}
+                className="text-xs text-red-300 hover:text-white px-2 py-0.5 rounded bg-red-900/40 cursor-pointer"
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
         )}
 
         {/* Input Area */}
         <div className="p-3 bg-slate-850 border-t border-slate-800 space-y-2 shrink-0">
           <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
-            <span className="flex items-center gap-1.5 font-mono text-emerald-400">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span>Twilio WhatsApp Directo: {currentSession.phoneNumber || currentSession.id}</span>
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="flex items-center gap-1.5 font-mono text-emerald-400">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>Twilio WhatsApp Directo: {currentSession.phoneNumber || currentSession.id}</span>
+              </span>
+              <button
+                type="button"
+                onClick={handleOpenTwilioModal}
+                className="text-[10px] text-teal-400 hover:text-teal-200 underline flex items-center gap-0.5 cursor-pointer ml-1"
+                title="Configurar credenciales y probar conexión"
+              >
+                <Settings className="w-2.5 h-2.5" />
+                <span>Configurar</span>
+              </button>
+            </div>
             {lastTwilioSid && (
               <span className="text-[10px] text-teal-300/80 font-mono truncate max-w-[200px]" title={`Twilio Message SID: ${lastTwilioSid}`}>
                 SID: {lastTwilioSid}
@@ -939,6 +1096,203 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
               >
                 <CheckCircle className="w-4 h-4" />
                 <span>Confirmar Cierre de Caso</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Configuración Rápida de Conexión Twilio WhatsApp */}
+      {twilioModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                  <Radio className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">
+                    Conexión Twilio WhatsApp en Vivo
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Configura y verifica el despacho directo al teléfono WhatsApp
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTwilioModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Status overview */}
+            <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Estado Auth Token en Servidor:</span>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                  hasServerAuthToken ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-500/20 text-red-300'
+                }`}>
+                  {hasServerAuthToken ? '● Configurado' : '○ No configurado'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Obtén tu <strong>Account SID</strong> y <strong>Auth Token</strong> actual en tu consola de Twilio:{' '}
+                <a
+                  href="https://console.twilio.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-teal-400 underline hover:text-teal-300 font-semibold inline-flex items-center gap-0.5"
+                >
+                  console.twilio.com
+                </a>
+              </p>
+            </div>
+
+            {/* Inputs Form */}
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                  Twilio Account SID (ej. AC...):
+                </label>
+                <input
+                  type="text"
+                  value={twAccountSid}
+                  onChange={(e) => setTwAccountSid(e.target.value)}
+                  placeholder="AC..."
+                  className="w-full bg-slate-950 text-white font-mono px-3 py-2 rounded-xl border border-slate-700 focus:outline-none focus:border-teal-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                  Twilio Auth Token Activo:
+                </label>
+                <div className="relative">
+                  <input
+                    type={showAuthToken ? 'text' : 'password'}
+                    value={twAuthToken}
+                    onChange={(e) => setTwAuthToken(e.target.value)}
+                    placeholder={hasServerAuthToken ? '•••••••••••••••••••••••••••••••• (deja vacío para no cambiar)' : 'Ingresa tu Auth Token de Twilio'}
+                    className="w-full bg-slate-950 text-white font-mono px-3 py-2 pr-9 rounded-xl border border-slate-700 focus:outline-none focus:border-teal-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAuthToken(!showAuthToken)}
+                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    {showAuthToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                  Número Twilio WhatsApp Remitente:
+                </label>
+                <input
+                  type="text"
+                  value={twWhatsappNumber}
+                  onChange={(e) => setTwWhatsappNumber(e.target.value)}
+                  placeholder="whatsapp:+14155238886"
+                  className="w-full bg-slate-950 text-white font-mono px-3 py-2 rounded-xl border border-slate-700 focus:outline-none focus:border-teal-500"
+                />
+              </div>
+
+              {/* Feedback Message */}
+              {twilioSaveMessage && (
+                <div className={`p-2.5 rounded-xl border text-xs flex items-center gap-2 ${
+                  twilioSaveMessage.success 
+                    ? 'bg-emerald-950/70 border-emerald-500/40 text-emerald-200' 
+                    : 'bg-red-950/70 border-red-500/40 text-red-200'
+                }`}>
+                  {twilioSaveMessage.success ? <Check className="w-4 h-4 text-emerald-400 shrink-0" /> : <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />}
+                  <span>{twilioSaveMessage.text}</span>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleSaveTwilioConfig}
+                disabled={isSavingTwilio}
+                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-emerald-600/20"
+              >
+                {isSavingTwilio ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Verificando con api.twilio.com...</span>
+                  </>
+                ) : (
+                  <>
+                    <KeyRound className="w-4 h-4" />
+                    <span>Guardar y Verificar Conexión</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Sandbox Step Helper */}
+            <div className="p-3 bg-amber-950/40 border border-amber-500/30 rounded-xl text-xs space-y-1">
+              <span className="font-bold text-amber-300 flex items-center gap-1">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                Paso Obligatorio para Sandbox Gratuito de WhatsApp:
+              </span>
+              <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                Para que un número reciba WhatsApps de prueba, el paciente o tú deben enviar primero el comando de activación:
+              </p>
+              <div className="p-2 bg-slate-950 rounded font-mono text-[11px] text-teal-300 border border-slate-800 text-center select-all">
+                join seldom-help
+              </div>
+              <p className="text-[10px] text-slate-400">
+                al número <strong>+1 415 523 8886</strong> desde WhatsApp en tu teléfono móvil.
+              </p>
+            </div>
+
+            {/* Live Test Sender */}
+            <div className="pt-2 border-t border-slate-800 space-y-2 text-xs">
+              <label className="block text-[11px] font-semibold text-slate-300">
+                Probar Despacho Inmediato a un Teléfono WhatsApp:
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={twTestPhone}
+                  onChange={(e) => setTwTestPhone(e.target.value)}
+                  placeholder="+573107956907"
+                  className="flex-1 bg-slate-950 text-white font-mono px-3 py-2 rounded-xl border border-slate-700 text-xs focus:outline-none focus:border-teal-500"
+                />
+                <button
+                  type="button"
+                  onClick={handleSendTestWhatsApp}
+                  disabled={isSendingTest}
+                  className="px-4 py-2 bg-teal-600 hover:bg-teal-500 disabled:opacity-50 text-white font-semibold rounded-xl text-xs transition cursor-pointer flex items-center gap-1.5 shrink-0"
+                >
+                  {isSendingTest ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  <span>Enviar Prueba</span>
+                </button>
+              </div>
+
+              {testResult && (
+                <div className={`p-2 rounded-lg border text-[11px] ${
+                  testResult.success 
+                    ? 'bg-emerald-950/60 border-emerald-500/30 text-emerald-200' 
+                    : 'bg-red-950/60 border-red-500/30 text-red-200'
+                }`}>
+                  {testResult.text}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setTwilioModalOpen(false)}
+                className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs transition cursor-pointer"
+              >
+                Cerrar
               </button>
             </div>
           </div>

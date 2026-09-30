@@ -200,6 +200,45 @@ const TWILIO_CONFIG = {
   whatsappNumber: cleanCredential(process.env.TWILIO_WHATSAPP_NUMBER) || 'whatsapp:+14155238886',
 };
 
+const TWILIO_CONFIG_FILE = path.join(process.cwd(), 'data', 'twilio_config.json');
+
+function loadTwilioConfigFromFile() {
+  try {
+    if (fs.existsSync(TWILIO_CONFIG_FILE)) {
+      const raw = fs.readFileSync(TWILIO_CONFIG_FILE, 'utf-8');
+      const data = JSON.parse(raw);
+      if (data.accountSid) TWILIO_CONFIG.accountSid = cleanCredential(data.accountSid);
+      if (data.authToken) TWILIO_CONFIG.authToken = cleanCredential(data.authToken);
+      if (data.whatsappNumber) {
+        const formatted = sanitizeWhatsAppNumber(cleanCredential(data.whatsappNumber));
+        TWILIO_CONFIG.whatsappNumber = formatted || cleanCredential(data.whatsappNumber);
+      }
+      console.log('[Twilio Config] Loaded custom Twilio credentials from data/twilio_config.json');
+    }
+  } catch (err) {
+    console.warn('[Twilio Config] Could not load data/twilio_config.json:', err);
+  }
+}
+
+function saveTwilioConfigToFile() {
+  try {
+    const dir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(TWILIO_CONFIG_FILE, JSON.stringify({
+      accountSid: TWILIO_CONFIG.accountSid,
+      authToken: TWILIO_CONFIG.authToken,
+      whatsappNumber: TWILIO_CONFIG.whatsappNumber,
+      updatedAt: new Date().toISOString()
+    }, null, 2));
+    console.log('[Twilio Config] Saved updated credentials to data/twilio_config.json');
+  } catch (err) {
+    console.warn('[Twilio Config] Could not save data/twilio_config.json:', err);
+  }
+}
+
+// Load persisted custom Twilio config if present
+loadTwilioConfigFromFile();
+
 // Helper: Sanitize and validate phone numbers for Twilio WhatsApp format (e.g. +573107956907 -> whatsapp:+573107956907)
 function sanitizeWhatsAppNumber(rawPhone: string): string | null {
   if (!rawPhone || typeof rawPhone !== 'string') return null;
@@ -1775,9 +1814,9 @@ app.post('/api/sessions/message', async (req, res) => {
   saveSessionsToFile();
 
   if (!sendResult.success) {
-    return res.status(502).json({
-      success: false,
-      error: sendResult.error || 'Twilio no pudo despachar el mensaje al teléfono del paciente.',
+    return res.status(200).json({
+      success: true,
+      warning: sendResult.error || 'Twilio no pudo despachar el mensaje al teléfono del paciente.',
       errorCode: sendResult.errorCode,
       session,
       message: newMsg,
@@ -2054,6 +2093,8 @@ app.post('/api/twilio/config', (req, res) => {
     const formatted = sanitizeWhatsAppNumber(cleanCredential(whatsappNumber));
     TWILIO_CONFIG.whatsappNumber = formatted || cleanCredential(whatsappNumber);
   }
+
+  saveTwilioConfigToFile();
 
   res.json({
     success: true,
