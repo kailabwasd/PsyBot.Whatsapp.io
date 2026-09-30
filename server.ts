@@ -1523,7 +1523,16 @@ const handleTwilioWebhook = async (req: express.Request, res: express.Response) 
 };
 
 // Register webhook handler across all standard Twilio paths
-const WEBHOOK_PATHS = ['/api/whatsapp', '/api/twilio/webhook', '/api/twilio', '/webhook', '/twilio', '/whatsapp'];
+const WEBHOOK_PATHS = [
+  '/api/whatsapp', 
+  '/api/twilio/webhook', 
+  '/api/twilio', 
+  '/webhook/whatsapp', 
+  '/webhook', 
+  '/twilio', 
+  '/whatsapp',
+  '/api/whatsapp/webhook'
+];
 WEBHOOK_PATHS.forEach(path => {
   app.post(path, handleTwilioWebhook);
   app.get(path, handleTwilioWebhook);
@@ -2461,7 +2470,7 @@ app.post('/api/twilio/test', async (req, res) => {
     return res.status(502).json({ 
       success: false, 
       to: sanitized,
-      error: result.error || 'No se pudo despachar el mensaje a través de Twilio. Verifica que el número esté unido a tu Sandbox enviando "join limited-burn" a +1 415 523 8886.' 
+      error: result.error || 'No se pudo despachar el mensaje a través de Twilio. Verifica que el número esté unido a tu Sandbox enviando "join seldom-help" a +1 415 523 8886.' 
     });
   }
 });

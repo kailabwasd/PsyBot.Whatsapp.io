@@ -47,7 +47,7 @@ export const IntegrationDocs: React.FC = () => {
       } else {
         setTestResult({ 
           status: 'error', 
-          message: data.error || 'Twilio no pudo entregar el mensaje. Asegúrate de haber enviado "join limited-burn" a +1 415 523 8886 antes de probar.' 
+          message: data.error || 'Twilio no pudo entregar el mensaje. Asegúrate de haber enviado "join seldom-help" a +1 415 523 8886 antes de probar.' 
         });
       }
     } catch (err: any) {
@@ -191,7 +191,7 @@ async def whatsapp_webhook(From: str = Form(...), Body: str = Form(...)):
             Diagnóstico Twilio & Conexión 24/7 en Vivo
           </h3>
           <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-300 border border-amber-500/30">
-            Sandbox ID: limited-burn
+            Sandbox ID: seldom-help
           </span>
         </div>
 
@@ -214,7 +214,7 @@ async def whatsapp_webhook(From: str = Form(...), Body: str = Form(...)):
             </div>
             <div className="bg-slate-900 p-3 rounded-lg border border-slate-800">
               <span className="text-slate-400 block text-[11px]">Código de Activación Sandbox:</span>
-              <span className="font-mono text-amber-300 font-bold block">join limited-burn</span>
+              <span className="font-mono text-amber-300 font-bold block">join seldom-help</span>
               <span className="text-[10px] text-slate-400 mt-1 inline-block">Enviar por WhatsApp a Twilio</span>
             </div>
           </div>
@@ -345,7 +345,7 @@ async def whatsapp_webhook(From: str = Form(...), Body: str = Form(...)):
               </p>
               <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs text-slate-300 space-y-1.5 font-mono">
                 <p>1. Guarda el contacto de Twilio en tu móvil: <strong className="text-teal-300">+1 415 523 8886</strong></p>
-                <p>2. Envíale un mensaje de WhatsApp con el texto exacto: <strong className="text-amber-300">join limited-burn</strong></p>
+                <p>2. Envíale un mensaje de WhatsApp con el texto exacto: <strong className="text-amber-300">join seldom-help</strong></p>
                 <p>3. Twilio te responderá confirmando que estás conectado al Sandbox.</p>
                 <p>4. Envía cualquier mensaje (ej. <em className="text-emerald-400">"Hola necesito apoyo"</em>) y recibirás la respuesta de Aura IA o el psicólogo.</p>
               </div>

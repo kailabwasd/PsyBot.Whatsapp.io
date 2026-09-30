@@ -374,7 +374,7 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
   };
 
   const copySandboxCode = () => {
-    navigator.clipboard.writeText('join limited-burn');
+    navigator.clipboard.writeText('join seldom-help');
     setCopiedCode(true);
     setTimeout(() => setCopiedCode(false), 2500);
   };
@@ -626,7 +626,7 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
                 Número oficial de WhatsApp: <strong className="text-emerald-700 font-mono text-sm">+1 415 523 8886</strong>
               </p>
               <p className="text-[11px] text-slate-600">
-                Escribe <code className="text-amber-800 font-bold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">join limited-burn</code> para iniciar de inmediato.
+                Escribe <code className="text-amber-800 font-bold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">join seldom-help</code> para iniciar de inmediato.
               </p>
             </div>
 
@@ -640,7 +640,7 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
               </button>
 
               <a
-                href="https://wa.me/14155238886?text=Hola%20PsyBot"
+                href="https://wa.me/14155238886?text=join%20seldom-help"
                 target="_blank"
                 rel="noreferrer"
                 className="py-2 px-4 rounded-xl text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white flex items-center gap-1.5 shadow-sm transition"
