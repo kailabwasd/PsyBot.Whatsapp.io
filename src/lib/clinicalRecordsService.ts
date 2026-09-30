@@ -250,6 +250,8 @@ export async function syncSessionToFirestoreClinicalRecord(session: PatientSessi
     diagnosticImpressions: session.diagnosticImpressions?.length ? session.diagnosticImpressions : ['Trastorno Adaptativo / Reacción al Estrés'],
     assignedPsychologist: session.assignedPsychologistName || cachedRecord?.assignedPsychologist || 'Lic. Sofia Ramos (Guardia)',
     accessLink: generatePsychologistAccessLink(recordId),
+    specialistOpinion: cachedRecord?.specialistOpinion,
+    specialistOpinionDate: cachedRecord?.specialistOpinionDate,
     lastUpdated: Date.now(),
     createdAt: cachedRecord?.createdAt ?? session.startedAt ?? Date.now(),
   };

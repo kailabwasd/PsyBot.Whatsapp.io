@@ -212,10 +212,37 @@ export function exportClinicalRecordToPDF(
   y += evoLines.length * 4 + 5;
 
   // -------------------------------------------------------------
+  // SECCIÓN 5: CONCEPTO PROFESIONAL Y JUICIO CLÍNICO DEL PSICÓLOGO
+  // -------------------------------------------------------------
+  if (record.specialistOpinion) {
+    checkPageBreak(30);
+    renderSectionHeader('Concepto Profesional y Dictamen del Especialista', '5');
+    
+    const opinionLines = doc.splitTextToSize(record.specialistOpinion, contentWidth - 8);
+    const boxHeight = opinionLines.length * 4 + 8;
+    
+    doc.setFillColor(lightBg[0], lightBg[1], lightBg[2]);
+    doc.roundedRect(margin, y, contentWidth, boxHeight, 1.5, 1.5, 'F');
+    doc.setDrawColor(148, 163, 184);
+    doc.roundedRect(margin, y, contentWidth, boxHeight, 1.5, 1.5, 'S');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+    doc.text('Dictamen / Opinión Especializada:', margin + 4, y + 4.5);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(darkSlate[0], darkSlate[1], darkSlate[2]);
+    doc.text(opinionLines, margin + 4, y + 9);
+    y += boxHeight + 5;
+  }
+
+  // -------------------------------------------------------------
   // SECCIÓN 6: RESUMEN DE LA CONVERSACIÓN ASISTENCIAL (WHATSAPP)
   // -------------------------------------------------------------
   checkPageBreak(35);
-  renderSectionHeader('Registro Asistencial y Transcripción de WhatsApp', '5');
+  renderSectionHeader('Registro Asistencial y Transcripción de WhatsApp', record.specialistOpinion ? '6' : '5');
 
   const transcript = record.conversationTranscript || 'Registro asistencial no disponible.';
   // Limit transcript length to keep PDF balanced (e.g. last 1500 chars)

@@ -106,6 +106,8 @@ export interface ClinicalRecord {
   diagnosticImpressions: string[];
   assignedPsychologist: string;
   accessLink: string;
+  specialistOpinion?: string; // Concepto Clínico y Juicio Profesional del Psicólogo
+  specialistOpinionDate?: number;
   lastUpdated: number;
   createdAt: number;
 }

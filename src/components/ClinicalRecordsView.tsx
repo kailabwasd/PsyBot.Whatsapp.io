@@ -20,9 +20,14 @@ import {
   Database,
   Table,
   Download,
-  Printer
+  Printer,
+  HeartHandshake,
+  Edit3,
+  ClipboardCheck,
+  AlertCircle,
+  Quote
 } from 'lucide-react';
-import type { ClinicalRecord, PatientSession, PsychologistAuthUser } from '../types';
+import type { ClinicalRecord, PatientSession, PsychologistAuthUser, RiskLevel } from '../types';
 import { SubaTechLogo } from './SubaTechLogo.tsx';
 import { Award } from 'lucide-react';
 import { 
@@ -49,6 +54,25 @@ interface ClinicalRecordsViewProps {
   currentUser?: PsychologistAuthUser | null;
 }
 
+const SPECIALIST_OPINION_TEMPLATES = [
+  {
+    title: '🟢 Estabilización Favorable',
+    text: 'Paciente orientado en las tres esferas, colaborador y con afecto congruente tras la intervención focal. Manifiesta disminución progresiva del malestar tras técnicas de desactivación fisiológica y anclaje cognitivo. No se identifican factores de riesgo inminente ni ideación hetero/autolítica. Se emite concepto favorable para manejo ambulatorio con pautas de higiene emocional y seguimiento a demanda.'
+  },
+  {
+    title: '🟡 Sobrecarga Situacional / Reactiva',
+    text: 'Se evidencia cuadro reactivo agudo a estresores sociofamiliares y laborales con rumiación cognitiva moderada e insomnio conciliatorio. Paciente conserva juicio de realidad y red de apoyo activa. Se recomienda proceso psicoterapéutico breve focalizado en reestructuración cognitiva, asertividad y pausas activas.'
+  },
+  {
+    title: '🟠 Derivación Prioritaria',
+    text: 'Sintomatología afectiva intensa con labilidad emocional marcada y signos de desesperanza que ameritan abordaje interdisciplinario. Se emite concepto para remisión prioritaria a consulta médica/psiquiátrica de la Subred Norte. Se coordina plan de contingencia y custodia con familiar responsable.'
+  },
+  {
+    title: '🔴 Código Rojo / Protocolo Crisis',
+    text: 'Se detecta alto nivel de vulnerabilidad afectiva e ideación de escape/crisis activa con desborde cognitivo. Se activan de forma inmediata los protocolos de emergencia distrital (Líneas 106 / 192) y articulación con red primaria. Se requiere valoración presencial de urgencias sin dilación.'
+  }
+];
+
 export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
   sessions,
   initialSelectedRecordId,
@@ -74,13 +98,20 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
   const [exportedSheetUrl, setExportedSheetUrl] = useState<string | null>(null);
   const [sheetsError, setSheetsError] = useState<string | null>(null);
 
-  // Editable fields for currently selected record
+  // Editable patient & clinical fields for currently selected record
+  const [editPatientName, setEditPatientName] = useState<string>('');
+  const [editPhoneNumber, setEditPhoneNumber] = useState<string>('');
   const [editAge, setEditAge] = useState<number>(30);
   const [editGender, setEditGender] = useState<string>('');
   const [editEmergency, setEditEmergency] = useState<string>('');
+  const [editRiskLevel, setEditRiskLevel] = useState<RiskLevel>('MODERADO');
+  const [editPrimaryEmotion, setEditPrimaryEmotion] = useState<string>('');
+  const [editTriageSummary, setEditTriageSummary] = useState<string>('');
   const [editMedicalHistory, setEditMedicalHistory] = useState<string>('');
   const [editEvolution, setEditEvolution] = useState<string>('');
   const [editImpressions, setEditImpressions] = useState<string>('');
+  const [editSpecialistOpinion, setEditSpecialistOpinion] = useState<string>('');
+  const [editAssignedPsychologist, setEditAssignedPsychologist] = useState<string>('');
 
   // 1. Initialize Auth and Google listener
   useEffect(() => {
@@ -144,12 +175,19 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
   // Keep form in sync when selecting another record
   useEffect(() => {
     if (selectedRecord) {
+      setEditPatientName(selectedRecord.patientName || '');
+      setEditPhoneNumber(selectedRecord.phoneNumber || '');
       setEditAge(selectedRecord.age || 28);
       setEditGender(selectedRecord.gender || 'No especificado');
       setEditEmergency(selectedRecord.emergencyContact || '');
+      setEditRiskLevel(selectedRecord.riskLevel || 'MODERADO');
+      setEditPrimaryEmotion(selectedRecord.primaryEmotion || 'Ansiedad Reactiva');
+      setEditTriageSummary(selectedRecord.triageSummary || '');
       setEditMedicalHistory(selectedRecord.medicalHistory || '');
       setEditEvolution(selectedRecord.clinicalEvolution || '');
       setEditImpressions((selectedRecord.diagnosticImpressions || []).join(', '));
+      setEditSpecialistOpinion(selectedRecord.specialistOpinion || '');
+      setEditAssignedPsychologist(selectedRecord.assignedPsychologist || currentUser?.displayName || 'Lic. Sofia Ramos');
     }
   }, [selectedRecord?.id]);
 
@@ -168,15 +206,23 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
     try {
       const updated: ClinicalRecord = {
         ...selectedRecord,
+        patientName: editPatientName.trim() || selectedRecord.patientName,
+        phoneNumber: editPhoneNumber.trim() || selectedRecord.phoneNumber,
         age: Number(editAge) || 28,
-        gender: editGender,
-        emergencyContact: editEmergency,
-        medicalHistory: editMedicalHistory,
-        clinicalEvolution: editEvolution,
+        gender: editGender.trim() || 'No especificado',
+        emergencyContact: editEmergency.trim(),
+        riskLevel: editRiskLevel,
+        primaryEmotion: editPrimaryEmotion.trim() || selectedRecord.primaryEmotion,
+        triageSummary: editTriageSummary.trim() || selectedRecord.triageSummary,
+        medicalHistory: editMedicalHistory.trim(),
+        clinicalEvolution: editEvolution.trim(),
         diagnosticImpressions: editImpressions
           .split(',')
           .map(s => s.trim())
           .filter(Boolean),
+        specialistOpinion: editSpecialistOpinion.trim(),
+        specialistOpinionDate: editSpecialistOpinion.trim() ? Date.now() : selectedRecord.specialistOpinionDate,
+        assignedPsychologist: editAssignedPsychologist.trim() || selectedRecord.assignedPsychologist || currentUser?.displayName || 'Lic. Sofia Ramos',
         lastUpdated: Date.now(),
       };
 
@@ -486,12 +532,16 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="text-base font-extrabold text-white">
-                      {selectedRecord.patientName}
+                      {editPatientName || selectedRecord.patientName}
                     </h3>
-                    {getRiskBadge(selectedRecord.riskLevel)}
+                    {getRiskBadge(editRiskLevel)}
+                    <span className="text-[10px] bg-teal-950/80 border border-teal-500/40 text-teal-300 px-2 py-0.5 rounded-full font-semibold flex items-center gap-1">
+                      <Edit3 className="w-3 h-3" />
+                      Modo Edición Clínico
+                    </span>
                   </div>
                   <p className="text-xs text-slate-400 font-mono mt-0.5">
-                    Expediente ID: {selectedRecord.id} • {selectedRecord.phoneNumber}
+                    Expediente ID: {selectedRecord.id} • {editPhoneNumber || selectedRecord.phoneNumber}
                   </p>
                 </div>
 
@@ -510,7 +560,7 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
                   {/* Psychologist Direct Access Link Button */}
                   <button
                     onClick={handleCopyLink}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-750 text-teal-300 border border-slate-700 rounded-xl text-xs font-semibold transition"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-750 text-teal-300 border border-slate-700 rounded-xl text-xs font-semibold transition cursor-pointer"
                     title="Copiar link directo para compartir con el psicólogo de guardia"
                   >
                     {copiedLink ? (
@@ -530,7 +580,7 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
                   <button
                     onClick={handleSaveRecord}
                     disabled={isSaving}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-teal-950"
+                    className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-teal-950 cursor-pointer"
                   >
                     <Save className="w-3.5 h-3.5" />
                     <span>{isSaving ? 'Guardando...' : 'Guardar Ficha'}</span>
@@ -541,26 +591,52 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
               {pdfSuccessNotice && (
                 <div className="bg-red-500/10 border-b border-red-500/20 px-4 py-2 text-xs text-red-300 flex items-center gap-2 animate-in fade-in">
                   <Download className="w-4 h-4 text-[#C8102E]" />
-                  <span>Historia clínica PDF generada exitosamente conforme a la Resolución 1995 de 1999.</span>
+                  <span>Historia clínica PDF generada exitosamente conforme a la Resolución 1995 de 1999 con el dictamen del especialista.</span>
                 </div>
               )}
 
               {saveSuccessNotice && (
-                <div className="bg-emerald-500/10 border-b border-emerald-500/20 px-4 py-2 text-xs text-emerald-300 flex items-center gap-2">
+                <div className="bg-emerald-500/10 border-b border-emerald-500/20 px-4 py-2 text-xs text-emerald-300 flex items-center gap-2 animate-in fade-in">
                   <Check className="w-4 h-4 text-emerald-400" />
-                  <span>Expediente actualizado exitosamente en Firebase Firestore.</span>
+                  <span>Información del paciente y concepto clínico actualizados exitosamente en Firestore.</span>
                 </div>
               )}
 
               {/* Scrollable Clinical Record Body */}
               <div className="flex-1 overflow-y-auto p-5 space-y-6">
                 
-                {/* 1. Datos Sociodemográficos y Básicos */}
+                {/* 1. Datos Sociodemográficos y Básicos (EDITABLE) */}
                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
-                  <h4 className="text-xs font-bold text-teal-400 uppercase tracking-wider flex items-center gap-2">
-                    <User className="w-4 h-4" />
-                    1. Datos Básicos y Demográficos
-                  </h4>
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-teal-400 uppercase tracking-wider flex items-center gap-2">
+                      <User className="w-4 h-4" />
+                      1. Información General y Demográfica del Paciente
+                    </h4>
+                    <span className="text-[10px] text-slate-400 italic">Editable por el Especialista</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-300 block mb-1">Nombre Completo del Paciente</label>
+                      <input
+                        type="text"
+                        value={editPatientName}
+                        onChange={(e) => setEditPatientName(e.target.value)}
+                        placeholder="Nombre y apellidos del paciente..."
+                        className="w-full bg-slate-900 border border-slate-750 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-teal-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-300 block mb-1">Teléfono WhatsApp / Canal de Contacto</label>
+                      <input
+                        type="text"
+                        value={editPhoneNumber}
+                        onChange={(e) => setEditPhoneNumber(e.target.value)}
+                        placeholder="+57..."
+                        className="w-full bg-slate-900 border border-slate-750 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-teal-500"
+                      />
+                    </div>
+                  </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
@@ -578,52 +654,92 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
                         type="text"
                         value={editGender}
                         onChange={(e) => setEditGender(e.target.value)}
-                        placeholder="Ej. Femenino, Masculino..."
+                        placeholder="Ej. Femenino, Masculino, No binario..."
                         className="w-full bg-slate-900 border border-slate-750 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-teal-500"
                       />
                     </div>
                     <div>
-                      <label className="text-[11px] text-slate-400 block mb-1">Psicólogo a Cargo</label>
-                      <div className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-300 font-semibold truncate">
-                        {selectedRecord.assignedPsychologist || 'Lic. Sofia Ramos'}
-                      </div>
+                      <label className="text-[11px] text-slate-400 block mb-1">Psicólogo Tratante Responsable</label>
+                      <input
+                        type="text"
+                        value={editAssignedPsychologist}
+                        onChange={(e) => setEditAssignedPsychologist(e.target.value)}
+                        placeholder="Nombre del especialista asignado"
+                        className="w-full bg-slate-900 border border-slate-750 rounded-lg px-3 py-1.5 text-xs text-teal-300 font-semibold focus:outline-none focus:border-teal-500"
+                      />
                     </div>
                   </div>
 
                   <div>
-                    <label className="text-[11px] text-slate-400 block mb-1">Contacto de Emergencia / Red de Apoyo</label>
+                    <label className="text-[11px] text-slate-400 block mb-1">Contacto de Emergencia / Red de Apoyo Familiar</label>
                     <input
                       type="text"
                       value={editEmergency}
                       onChange={(e) => setEditEmergency(e.target.value)}
-                      placeholder="Nombre y teléfono de familiar de contacto"
+                      placeholder="Nombre, parentesco y teléfono de la red de apoyo"
                       className="w-full bg-slate-900 border border-slate-750 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-teal-500"
                     />
                   </div>
                 </div>
 
-                {/* 2. Motivo de Ingreso y Triage */}
+                {/* 2. Motivo de Ingreso y Triage (EDITABLE) */}
                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
                   <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-2">
                     <Activity className="w-4 h-4" />
                     2. Triage & Estado Afectivo Inicial
                   </h4>
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                    <div className="p-3 bg-slate-900 rounded-lg border border-slate-800">
-                      <span className="text-[11px] text-slate-400 block">Emoción Primaria:</span>
-                      <p className="font-semibold text-white mt-0.5">{selectedRecord.primaryEmotion}</p>
+                    <div>
+                      <label className="text-[11px] text-slate-400 block mb-1">Emoción Primaria Predominante</label>
+                      <input
+                        type="text"
+                        value={editPrimaryEmotion}
+                        onChange={(e) => setEditPrimaryEmotion(e.target.value)}
+                        placeholder="Ej. Ansiedad Reactiva, Angustia, Duelo..."
+                        className="w-full bg-slate-900 border border-slate-750 rounded-lg px-3 py-2 text-xs text-white font-semibold focus:outline-none focus:border-teal-500"
+                      />
                     </div>
-                    <div className="p-3 bg-slate-900 rounded-lg border border-slate-800">
-                      <span className="text-[11px] text-slate-400 block">Nivel de Riesgo Evaluado:</span>
-                      <div className="mt-1">{getRiskBadge(selectedRecord.riskLevel)}</div>
+
+                    <div>
+                      <label className="text-[11px] text-slate-400 block mb-1">Nivel de Riesgo Clínico Asignado</label>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {(['BAJO', 'MODERADO', 'ALTO', 'CRISIS'] as RiskLevel[]).map((r) => {
+                          const isSel = editRiskLevel === r;
+                          return (
+                            <button
+                              key={r}
+                              type="button"
+                              onClick={() => setEditRiskLevel(r)}
+                              className={`py-1.5 px-1 rounded-lg text-[10px] font-bold transition border cursor-pointer ${
+                                isSel
+                                  ? r === 'CRISIS'
+                                    ? 'bg-red-500/25 text-red-300 border-red-500 shadow-sm'
+                                    : r === 'ALTO'
+                                    ? 'bg-amber-500/25 text-amber-300 border-amber-500 shadow-sm'
+                                    : r === 'MODERADO'
+                                    ? 'bg-yellow-500/25 text-yellow-300 border-yellow-500 shadow-sm'
+                                    : 'bg-emerald-500/25 text-emerald-300 border-emerald-500 shadow-sm'
+                                  : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+                              }`}
+                            >
+                              {r}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
 
                   <div>
-                    <label className="text-[11px] text-slate-400 block mb-1">Resumen del Triage Clínico</label>
-                    <p className="text-xs text-slate-300 bg-slate-900 p-3 rounded-lg border border-slate-800 leading-relaxed">
-                      {selectedRecord.triageSummary}
-                    </p>
+                    <label className="text-[11px] text-slate-400 block mb-1">Resumen del Triage Clínico (Aura IA & Guardia)</label>
+                    <textarea
+                      rows={3}
+                      value={editTriageSummary}
+                      onChange={(e) => setEditTriageSummary(e.target.value)}
+                      placeholder="Motivo de ingreso, contexto inicial y hallazgos del triage..."
+                      className="w-full bg-slate-900 border border-slate-750 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-teal-500 leading-relaxed"
+                    />
                   </div>
                 </div>
 
@@ -639,7 +755,7 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
                       onClick={() => {
                         setIsGeneratingAiSummary(true);
                         setTimeout(() => {
-                          const summaryText = `[RESUMEN CLÍNICO IA - ${new Date().toLocaleDateString()}]:\n• Anamnesis: Paciente reporta sintomatología emocional focalizada en ${selectedRecord.primaryEmotion}.\n• Estado Afectivo: Riesgo evaluado como ${selectedRecord.riskLevel}. Se observa apertura al diálogo y disposición para autorregulación.\n• Plan de Seguimiento: Aplicar técnicas de reencuadre cognitivo, respiración diafragmática 4-7-8 e higiene de sueño. Seguimiento de guardia programado en 48 horas.`;
+                          const summaryText = `[RESUMEN CLÍNICO IA - ${new Date().toLocaleDateString()}]:\n• Anamnesis: Paciente reporta sintomatología emocional focalizada en ${editPrimaryEmotion || selectedRecord.primaryEmotion}.\n• Estado Afectivo: Riesgo evaluado como ${editRiskLevel}. Se observa apertura al diálogo y disposición para autorregulación.\n• Plan de Seguimiento: Aplicar técnicas de reencuadre cognitivo, respiración diafragmática 4-7-8 e higiene de sueño. Seguimiento de guardia programado en 48 horas.`;
                           setEditEvolution((prev) => prev ? `${prev}\n\n${summaryText}` : summaryText);
                           setEditImpressions((prev) => prev ? `${prev}, Trastorno Adaptativo con Ansiedad` : 'Trastorno Adaptativo con Ansiedad');
                           setIsGeneratingAiSummary(false);
@@ -695,12 +811,91 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
                   </div>
                 </div>
 
-                {/* 4. Transcripción y Registro de lo Hablado */}
+                {/* 4. CONCEPTO PROFESIONAL Y DICTAMEN DEL PSICÓLOGO (NUEVA SECCIÓN) */}
+                <div className="bg-slate-950 p-4 rounded-xl border border-teal-500/40 shadow-lg space-y-3 relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-teal-500/5 rounded-full blur-2xl pointer-events-none"></div>
+                  
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                    <h4 className="text-xs font-bold text-teal-300 uppercase tracking-wider flex items-center gap-2">
+                      <HeartHandshake className="w-4 h-4 text-teal-400" />
+                      4. Concepto Clínico y Juicio Profesional del Psicólogo
+                    </h4>
+                    <span className="text-[10px] text-teal-400 bg-teal-950/70 border border-teal-500/30 px-2 py-0.5 rounded-full font-medium">
+                      Oficial • Se exporta al PDF
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Registra tu dictamen psicológico, juicio pronóstico y consideraciones terapéuticas. Puedes redactar libremente o utilizar una de las plantillas estandarizadas:
+                  </p>
+
+                  {/* Quick Clinical Opinion Template Buttons */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                      Plantillas Rápidas de Dictamen Clínico:
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {SPECIALIST_OPINION_TEMPLATES.map((tmpl, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            setEditSpecialistOpinion(tmpl.text);
+                          }}
+                          className="text-left p-2 rounded-lg bg-slate-900 hover:bg-teal-950/40 text-slate-300 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-xs flex flex-col gap-0.5 cursor-pointer"
+                        >
+                          <span className="font-bold text-[11px] text-teal-300">{tmpl.title}</span>
+                          <span className="text-[10px] text-slate-400 line-clamp-1">{tmpl.text}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Specialist Opinion Textarea */}
+                  <div className="space-y-1 pt-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <label className="font-semibold text-slate-300 flex items-center gap-1.5">
+                        <Quote className="w-3.5 h-3.5 text-teal-400" />
+                        <span>Dictamen / Opinión Especializada:</span>
+                      </label>
+                      <span className="text-slate-500 text-[10px]">
+                        {editSpecialistOpinion.length} caracteres
+                      </span>
+                    </div>
+
+                    <textarea
+                      rows={5}
+                      value={editSpecialistOpinion}
+                      onChange={(e) => setEditSpecialistOpinion(e.target.value)}
+                      placeholder="Escribe aquí tu opinión profesional: Paciente orientado, colaborador, juicio de realidad conservado. Se brinda contención emocional, técnica de desactivación fisiológica y se acuerda plan de seguridad..."
+                      className="w-full bg-slate-900 border border-slate-700 focus:border-teal-500 rounded-xl p-3 text-xs text-white placeholder-slate-500 focus:outline-none leading-relaxed transition shadow-inner"
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/80 text-[11px]">
+                    <div className="text-slate-400 flex items-center gap-1">
+                      <span>Profesional responsable:</span>
+                      <strong className="text-teal-300">{editAssignedPsychologist || selectedRecord.assignedPsychologist || 'Lic. Sofia Ramos'}</strong>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleSaveRecord}
+                      disabled={isSaving}
+                      className="px-3.5 py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-md shadow-teal-900"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      <span>{isSaving ? 'Guardando...' : 'Guardar Concepto en Firestore'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 5. Transcripción y Registro de lo Hablado */}
                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
                   <div className="flex items-center justify-between">
                     <h4 className="text-xs font-bold text-sky-400 uppercase tracking-wider flex items-center gap-2">
                       <MessageSquare className="w-4 h-4" />
-                      4. Registro y Transcripción de lo Hablado
+                      5. Registro y Transcripción de lo Hablado
                     </h4>
                     <span className="text-[10px] text-slate-500 font-mono">
                       WhatsApp Live Sync
@@ -712,7 +907,7 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
                   </div>
                 </div>
 
-                {/* 5. Enlace Único de Acceso para el Psicólogo */}
+                {/* 6. Enlace Único de Acceso para el Psicólogo */}
                 <div className="p-4 rounded-xl bg-teal-500/10 border border-teal-500/30 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-teal-300 flex items-center gap-1.5">
@@ -721,7 +916,7 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
                     </span>
                     <button
                       onClick={handleCopyLink}
-                      className="text-xs text-teal-400 hover:text-white font-semibold underline flex items-center gap-1"
+                      className="text-xs text-teal-400 hover:text-white font-semibold underline flex items-center gap-1 cursor-pointer"
                     >
                       {copiedLink ? '¡Copiado al portapapeles!' : 'Copiar Enlace'}
                     </button>
