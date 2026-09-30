@@ -704,12 +704,20 @@ export default function App() {
   const handleSendMessage = async (sessionId: string, text: string) => {
     if (!currentUser) return;
     try {
-      const updated = await sendPsychologistMessage(sessionId, text, currentUser.displayName);
+      const updated = await sendPsychologistMessage(
+        sessionId, 
+        text, 
+        currentUser.displayName || currentUser.email || 'Psicólogo Especialista'
+      );
       await saveActiveSessionToFirestore(updated);
       await syncSessionToFirestoreClinicalRecord(updated);
       setSessions((prev) => prev.map((s) => (s.id === sessionId ? updated : s)));
-    } catch (e) {
-      console.error('Error sending message:', e);
+    } catch (e: any) {
+      console.error('Error sending message via Twilio WhatsApp:', e);
+      if (e.session) {
+        setSessions((prev) => prev.map((s) => (s.id === sessionId ? e.session : s)));
+      }
+      throw e;
     }
   };
 

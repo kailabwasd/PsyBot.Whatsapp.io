@@ -393,14 +393,15 @@ export async function sendPsychologistMessage(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId, text, psychologistName }),
     });
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      const err: any = new Error(errData.error || `Error ${res.status}: Fallo al despachar mensaje`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false || data.twilioDelivery?.success === false) {
+      const errorMsg = data.error || data.twilioDelivery?.error || `Error ${res.status}: Fallo al despachar mensaje a WhatsApp`;
+      const err: any = new Error(errorMsg);
       err.status = res.status;
-      err.errorCode = errData.errorCode;
+      err.errorCode = data.errorCode || data.twilioDelivery?.errorCode;
+      err.session = data.session;
       throw err;
     }
-    const data = await res.json();
     return data.session;
   }, { 
     serviceName: 'TWILIO_MESSAGE', 

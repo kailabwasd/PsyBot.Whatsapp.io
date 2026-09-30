@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import type { PatientSession, PsychologistProfile, RiskLevel } from '../types/index.ts';
 import { sendDirectTwilioWhatsApp } from '../services/api.ts';
+import { exportSessionSummaryToPDF } from '../lib/pdfExportService.ts';
 
 interface PatientSentiment {
   sentimentCategory: 'feliz' | 'neutra' | 'preocupada';
@@ -112,6 +113,8 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
   const [resolutionPromptOpen, setResolutionPromptOpen] = useState(false);
   const [resolutionNotes, setResolutionNotes] = useState('');
   const [copiedRecordLink, setCopiedRecordLink] = useState(false);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [pdfSuccessMessage, setPdfSuccessMessage] = useState<string | null>(null);
   
   // Gemini Patient Sentiment State
   const [sentiment, setSentiment] = useState<PatientSentiment | null>(null);
@@ -245,6 +248,22 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
     }
   };
 
+  const handleDownloadSessionPdf = () => {
+    if (!currentSession) return;
+    setIsGeneratingPdf(true);
+    setPdfSuccessMessage(null);
+    try {
+      exportSessionSummaryToPDF(currentSession, currentSpecialist, localNotes);
+      setPdfSuccessMessage(`Resumen PDF descargado con éxito para ${currentSession.userName || 'paciente'}.`);
+      setTimeout(() => setPdfSuccessMessage(null), 4500);
+    } catch (err: any) {
+      console.error('Error generando PDF de la sesión:', err);
+      setSendError('No se pudo generar el documento PDF de la sesión.');
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
+
   const handleApplyPreset = (presetText: string) => {
     setInputText(presetText);
   };
@@ -373,6 +392,21 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
             {/* Quick Chat Actions */}
             <div className="flex items-center gap-2">
               <button
+                type="button"
+                onClick={handleDownloadSessionPdf}
+                disabled={isGeneratingPdf}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-rose-300 hover:text-white bg-rose-950/60 hover:bg-rose-900 border border-rose-500/40 flex items-center gap-1.5 transition disabled:opacity-50 shadow-sm cursor-pointer"
+                title="Generar y Descargar Resumen Clínico en PDF (jsPDF)"
+              >
+                {isGeneratingPdf ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-rose-400" />
+                ) : (
+                  <FileText className="w-3.5 h-3.5 text-rose-400" />
+                )}
+                <span className="hidden sm:inline">Resumen PDF</span>
+              </button>
+
+              <button
                 onClick={() => onTransfer(currentSession.id, 'AI_MODE')}
                 className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center gap-1.5 transition"
                 title="Transferir al Asistente Aura IA"
@@ -391,6 +425,23 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
               </button>
             </div>
           </div>
+
+          {/* Feedback Banner para Descarga de PDF */}
+          {pdfSuccessMessage && (
+            <div className="px-3 py-1.5 bg-emerald-950/90 border border-emerald-500/40 rounded-lg text-xs text-emerald-200 flex items-center justify-between animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="font-medium">{pdfSuccessMessage}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPdfSuccessMessage(null)}
+                className="text-xs text-emerald-400 hover:text-white ml-2"
+              >
+                ✕
+              </button>
+            </div>
+          )}
 
           {/* Banner de Estado de Modo Actual de Atención */}
           <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">
@@ -706,15 +757,29 @@ export const ActiveChat: React.FC<ActiveChatProps> = ({
                 className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30 transition"
                 title="Abrir expediente completo en Firestore"
               >
-                <span>Ficha Firebase</span>
+                <span>Ficha</span>
               </button>
             )}
             <button
+              type="button"
+              onClick={handleDownloadSessionPdf}
+              disabled={isGeneratingPdf}
+              className="text-xs font-semibold text-rose-300 hover:text-white flex items-center gap-1 bg-rose-950/50 hover:bg-rose-900/60 px-2 py-0.5 rounded border border-rose-500/30 transition disabled:opacity-50 cursor-pointer"
+              title="Descargar Resumen de Sesión en PDF (jsPDF)"
+            >
+              {isGeneratingPdf ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-rose-400" />
+              ) : (
+                <Download className="w-3.5 h-3.5 text-rose-400" />
+              )}
+              <span>PDF</span>
+            </button>
+            <button
               onClick={() => onOpenReportModal(currentSession)}
               className="text-xs font-semibold text-teal-400 hover:text-teal-300 flex items-center gap-1"
-              title="Exportar informe de sesión"
+              title="Exportar informe clínico detallado"
             >
-              <Download className="w-3.5 h-3.5" />
+              <FileText className="w-3.5 h-3.5" />
               Informe
             </button>
           </div>
