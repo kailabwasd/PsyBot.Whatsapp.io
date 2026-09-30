@@ -192,8 +192,8 @@ function cleanCredential(val: string | undefined | null): string {
 
 // Twilio WhatsApp credentials
 const TWILIO_CONFIG = {
-  accountSid: cleanCredential(process.env.TWILIO_ACCOUNT_SID) || 'ACe13be538d71e3ac31fd56bbdf7d86902',
-  authToken: cleanCredential(process.env.TWILIO_AUTH_TOKEN) || '16c6e19e2aefea46ff4104cdb5077eb5',
+  accountSid: cleanCredential(process.env.TWILIO_ACCOUNT_SID),
+  authToken: cleanCredential(process.env.TWILIO_AUTH_TOKEN),
   whatsappNumber: cleanCredential(process.env.TWILIO_WHATSAPP_NUMBER) || 'whatsapp:+14155238886',
 };
 

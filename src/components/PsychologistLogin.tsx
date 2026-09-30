@@ -640,12 +640,12 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
               </button>
 
               <a
-                href="https://wa.me/14155238886?text=join%20limited-burn"
+                href="https://wa.me/14155238886?text=Hola%20PsyBot"
                 target="_blank"
                 rel="noreferrer"
                 className="py-2 px-4 rounded-xl text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white flex items-center gap-1.5 shadow-sm transition"
               >
-                <span>Abrir Chat WhatsApp</span>
+                <span>Abrir Chat WhatsApp (+1 415 523 8886)</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </a>
             </div>

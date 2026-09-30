@@ -204,7 +204,7 @@ async def whatsapp_webhook(From: str = Form(...), Body: str = Form(...)):
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
             <div className="bg-slate-900 p-3 rounded-lg border border-slate-800">
               <span className="text-slate-400 block text-[11px]">Account SID:</span>
-              <span className="font-mono text-emerald-400 font-semibold truncate block">ACe13be538d71e3ac31fd56bbdf7d86902</span>
+              <span className="font-mono text-emerald-400 font-semibold truncate block">Configurado (Consola Twilio)</span>
               <span className="text-[10px] text-emerald-300 mt-1 inline-block">✓ Cuenta Activa (Trial)</span>
             </div>
             <div className="bg-slate-900 p-3 rounded-lg border border-slate-800">

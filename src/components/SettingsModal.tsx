@@ -227,8 +227,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       ]);
       setErrorLogs(logs);
       if (config) {
-        if (!twilioAccountSid) setTwilioAccountSid(config.accountSid || '');
-        if (!twilioWhatsappNumber) setTwilioWhatsappNumber(config.whatsappNumber || '');
+        if (config.accountSid) setTwilioAccountSid(config.accountSid);
+        if (config.whatsappNumber) setTwilioWhatsappNumber(config.whatsappNumber);
         setHasTwilioAuthToken(config.hasAuthToken || false);
       }
       if (notifyConfig) {
