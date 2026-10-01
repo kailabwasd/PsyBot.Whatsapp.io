@@ -535,10 +535,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       await logAuditEvent({
         adminEmail: currentUser.email || 'kailabwasd@gmail.com',
         adminName: currentUser.displayName || 'Super Administrador',
-        action: 'ROLE_UPDATE',
+        psychologistUid: psych.uid,
+        psychologistName: psych.displayName,
+        psychologistEmail: psych.email || undefined,
+        psychologistLicense: psych.license || undefined,
+        action: 'PSYCHOLOGIST_APPROVAL',
         severity: 'CRITICAL',
         category: 'ROLES',
-        details: `Autorización de acceso al portal médico concedida a ${psych.displayName} (${psych.email || 'sin correo'}). Tarjeta Profesional: ${psych.license || 'N/A'}.`,
+        details: `Aceptación y autorización manual de acceso concedida por el Administrador a ${psych.displayName} (${psych.email || 'sin correo'}). Tarjeta Profesional: ${psych.license || 'N/A'}. Rol: ${finalRole}.`,
       });
       updatePsychDraft(psych.uid, { savedNotice: true });
       setTimeout(() => updatePsychDraft(psych.uid, { savedNotice: false }), 3000);
@@ -549,27 +553,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const handleRejectOrSuspend = async (psych: PsychologistAuthUser) => {
+  const handleRejectOrSuspend = async (psych: PsychologistAuthUser, reason?: string) => {
     setActionLoadingUid(psych.uid);
+    const isPending = psych.approvalStatus === 'PENDING' || !psych.isApproved;
+    const finalReason = reason || (isPending ? 'Solicitud de acceso denegada por el Administrador Clínico' : 'Acceso revocado o suspendido por el Administrador Clínico');
     try {
       await rejectOrSuspendPsychologist(
         psych.uid, 
         currentUser.email || 'kailabwasd@gmail.com',
-        'Acceso revocado o suspendido por el Administrador Clínico'
+        finalReason
       );
       await onUpdatePsychologistRole(psych.uid, false, psych.role, { lectura: false, escritura: false, administrativo: false }, 'REJECTED', false);
       await logAuditEvent({
         adminEmail: currentUser.email || 'kailabwasd@gmail.com',
         adminName: currentUser.displayName || 'Super Administrador',
-        action: 'ROLE_UPDATE',
+        psychologistUid: psych.uid,
+        psychologistName: psych.displayName,
+        psychologistEmail: psych.email || undefined,
+        psychologistLicense: psych.license || undefined,
+        action: isPending ? 'PSYCHOLOGIST_REJECTION' : 'PSYCHOLOGIST_SUSPENSION',
         severity: 'CRITICAL',
         category: 'ROLES',
-        details: `Acceso revocado/suspendido para ${psych.displayName} (${psych.email || 'sin correo'}).`,
+        details: `Solicitud ${isPending ? 'DENEGADA' : 'SUSPENDIDA'} para ${psych.displayName} (${psych.email || 'sin correo'}). Motivo: "${finalReason}".`,
       });
       updatePsychDraft(psych.uid, { savedNotice: true });
       setTimeout(() => updatePsychDraft(psych.uid, { savedNotice: false }), 3000);
     } catch (err: any) {
-      console.error('Error al suspender psicólogo:', err);
+      console.error('Error al denegar/suspender psicólogo:', err);
     } finally {
       setActionLoadingUid(null);
     }
@@ -1579,26 +1589,49 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         {!isProtectedOwner && (
                           <div className="pt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-850">
                             <div className="flex flex-wrap items-center gap-2">
-                              {/* ACCIÓN PRINCIPAL: AUTORIZAR ACCESO O SUSPENDER */}
+                              {/* ACCIÓN PRINCIPAL: AUTORIZAR ACCESO O DENEGAR / SUSPENDER */}
                               {!isApprovedUser ? (
-                                <button
-                                  type="button"
-                                  disabled={actionLoadingUid === psych.uid}
-                                  onClick={() => handleApproveAccess(psych)}
-                                  className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 transition cursor-pointer disabled:opacity-50"
-                                >
-                                  {actionLoadingUid === psych.uid ? (
-                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                                  ) : (
-                                    <CheckCircle2 className="w-4 h-4" />
-                                  )}
-                                  <span>Autorizar Acceso al Portal</span>
-                                </button>
+                                <>
+                                  <button
+                                    type="button"
+                                    disabled={actionLoadingUid === psych.uid}
+                                    onClick={() => handleApproveAccess(psych)}
+                                    className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 transition cursor-pointer disabled:opacity-50"
+                                    title="Aceptar y conceder acceso al psicólogo en el portal"
+                                  >
+                                    {actionLoadingUid === psych.uid ? (
+                                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                    ) : (
+                                      <CheckCircle2 className="w-4 h-4" />
+                                    )}
+                                    <span>Aceptar y Autorizar Acceso</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    disabled={actionLoadingUid === psych.uid}
+                                    onClick={() => {
+                                      const reason = window.prompt(`Ingresa el motivo de la denegación para ${psych.displayName}:`, 'Tarjeta Profesional no verificada o perfil no habilitado');
+                                      if (reason !== null) {
+                                        handleRejectOrSuspend(psych, reason);
+                                      }
+                                    }}
+                                    className="px-3.5 py-2 rounded-xl bg-red-950/60 hover:bg-red-900/70 text-red-300 border border-red-500/40 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                                    title="Denegar acceso al psicólogo"
+                                  >
+                                    <UserX className="w-3.5 h-3.5 text-red-400" />
+                                    <span>Denegar Solicitud</span>
+                                  </button>
+                                </>
                               ) : (
                                 <button
                                   type="button"
                                   disabled={actionLoadingUid === psych.uid}
-                                  onClick={() => handleRejectOrSuspend(psych)}
+                                  onClick={() => {
+                                    if (window.confirm(`¿Estás seguro de suspender el acceso de ${psych.displayName}?`)) {
+                                      handleRejectOrSuspend(psych, 'Acceso suspendido por la Administración');
+                                    }
+                                  }}
                                   className="px-3.5 py-2 rounded-xl bg-red-950/50 hover:bg-red-900/60 text-red-300 border border-red-500/40 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
                                 >
                                   <UserX className="w-3.5 h-3.5" />

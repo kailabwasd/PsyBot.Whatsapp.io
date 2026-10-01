@@ -17,5 +17,17 @@ service cloud.firestore {
     match /active_sessions/{sessionId} {
       allow read, write: if true;
     }
+
+    match /audit_logs/{logId} {
+      allow read, write: if true;
+    }
+
+    match /psychologists/{userId}/audit_logs/{logId} {
+      allow read, write: if true;
+    }
+
+    match /clinical_records/{recordId}/audit_logs/{logId} {
+      allow read, write: if true;
+    }
   }
 }

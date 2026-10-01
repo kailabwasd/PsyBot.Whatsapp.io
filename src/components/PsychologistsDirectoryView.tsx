@@ -34,6 +34,7 @@ import {
   findPsychologistByLicense,
   approvePsychologist 
 } from '../lib/firebase.ts';
+import { logAuditEvent } from './AuditLog.tsx';
 
 interface PsychologistsDirectoryViewProps {
   currentUser: PsychologistAuthUser | null;
@@ -79,6 +80,18 @@ export const PsychologistsDirectoryView: React.FC<PsychologistsDirectoryViewProp
         psych.permissions || { lectura: true, escritura: true, administrativo: false },
         psych.role || 'Psicólogo(a) Clínico Titulado(a)'
       );
+      logAuditEvent({
+        adminEmail: currentUser?.email || 'kailabwasd@gmail.com',
+        adminName: currentUser?.displayName || 'Super Administrador',
+        psychologistUid: psych.uid,
+        psychologistName: psych.displayName,
+        psychologistEmail: psych.email || undefined,
+        psychologistLicense: psych.license || undefined,
+        action: 'PSYCHOLOGIST_APPROVAL',
+        severity: 'CRITICAL',
+        category: 'ROLES',
+        details: `Aprobación rápida de acceso concedida por el Administrador a ${psych.displayName} (${psych.email || 'sin correo'}) desde el Directorio. Tarjeta Profesional: ${psych.license || 'N/A'}.`,
+      }).catch(() => {});
     } catch (err) {
       console.error('Error in quick approve:', err);
     } finally {

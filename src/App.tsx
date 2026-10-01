@@ -43,6 +43,7 @@ import { LegalTermsModal, LegalTabType } from './components/LegalTermsModal.tsx'
 import { NotificationToastContainer } from './components/NotificationToast.tsx';
 import { PsychologistsDirectoryView } from './components/PsychologistsDirectoryView.tsx';
 import { PatientRegistrationModal } from './components/PatientRegistrationModal.tsx';
+import { logAuditEvent } from './components/AuditLog.tsx';
 import { 
   syncSessionToFirestoreClinicalRecord, 
   saveActiveSessionToFirestore, 
@@ -700,6 +701,18 @@ export default function App() {
 
   // Logout handler
   const handleLogout = async () => {
+    if (currentUser) {
+      logAuditEvent({
+        action: 'LOGOUT',
+        severity: 'INFO',
+        category: 'ACCESOS',
+        psychologistUid: currentUser.uid,
+        psychologistName: currentUser.displayName,
+        psychologistEmail: currentUser.email || undefined,
+        psychologistLicense: currentUser.license || undefined,
+        details: `Cierre de sesión de ${currentUser.displayName} (${currentUser.license || 'ReTHUS'}).`,
+      }).catch(() => {});
+    }
     await logoutPsychologist();
     setCurrentUser(null);
     setIsCompletingProfile(false);
@@ -727,7 +740,7 @@ export default function App() {
     activeCasesCount: 0,
   };
 
-  // Handlers
+  // Handlers with automatic audit traceability
   const handleClaim = async (session: PatientSession) => {
     if (!currentUser) return;
     markCrisisNotified(session.id, session.phoneNumber);
@@ -738,6 +751,20 @@ export default function App() {
       setSessions((prev) => prev.map((s) => (s.id === session.id ? updated : s)));
       setActiveSessionId(session.id);
       setActiveTab('ACTIVE');
+
+      logAuditEvent({
+        action: 'SESSION_CLAIM',
+        severity: 'INFO',
+        category: 'CLÍNICO',
+        psychologistUid: currentUser.uid,
+        psychologistName: currentUser.displayName,
+        psychologistEmail: currentUser.email || undefined,
+        psychologistLicense: currentUser.license || undefined,
+        patientId: session.phoneNumber || session.id,
+        patientName: session.userName,
+        sessionId: session.id,
+        details: `El especialista ${currentUser.displayName} (${currentUser.license || 'ReTHUS'}) tomó la atención de ${session.userName}.`,
+      }).catch(() => {});
     } catch (e) {
       console.error('Error claiming session:', e);
     }
@@ -765,6 +792,7 @@ export default function App() {
 
   const handleTransfer = async (sessionId: string, target: 'AI_MODE' | 'WAITING_PSYCHOLOGIST') => {
     try {
+      const targetSes = sessions.find(s => s.id === sessionId);
       const updated = await transferSession(sessionId, target);
       await saveActiveSessionToFirestore(updated);
       await syncSessionToFirestoreClinicalRecord(updated);
@@ -773,6 +801,20 @@ export default function App() {
         const next = sessions.find((s) => s.id !== sessionId && s.state === 'HUMAN_MODE');
         setActiveSessionId(next ? next.id : null);
       }
+
+      logAuditEvent({
+        action: 'SESSION_TRANSFER',
+        severity: 'WARNING',
+        category: 'TRANSFERENCIAS',
+        psychologistUid: currentUser?.uid,
+        psychologistName: currentUser?.displayName,
+        psychologistEmail: currentUser?.email || undefined,
+        psychologistLicense: currentUser?.license || undefined,
+        patientId: targetSes?.phoneNumber || targetSes?.id,
+        patientName: targetSes?.userName,
+        sessionId,
+        details: `Transferencia de caso ${targetSes?.userName || sessionId} hacia ${target === 'AI_MODE' ? 'Supervisor IA / Contención' : 'Cola de Guardia General'}.`,
+      }).catch(() => {});
     } catch (e) {
       console.error('Error transferring session:', e);
     }
@@ -788,10 +830,25 @@ export default function App() {
     }
   ) => {
     try {
+      const targetSes = sessions.find(s => s.id === sessionId);
       const updated = await saveClinicalNotes(sessionId, data);
       await saveActiveSessionToFirestore(updated);
       await syncSessionToFirestoreClinicalRecord(updated);
       setSessions((prev) => prev.map((s) => (s.id === sessionId ? updated : s)));
+
+      logAuditEvent({
+        action: 'CLINICAL_NOTE_UPDATE',
+        severity: 'INFO',
+        category: 'CLÍNICO',
+        psychologistUid: currentUser?.uid,
+        psychologistName: currentUser?.displayName,
+        psychologistEmail: currentUser?.email || undefined,
+        psychologistLicense: currentUser?.license || undefined,
+        patientId: targetSes?.phoneNumber || targetSes?.id,
+        patientName: targetSes?.userName,
+        sessionId,
+        details: `Modificación de notas clínicas y diagnósticos de ${targetSes?.userName || sessionId}. Nivel de Riesgo: ${data.riskLevel || targetSes?.riskLevel || 'N/A'}.`,
+      }).catch(() => {});
     } catch (e) {
       console.error('Error saving notes:', e);
     }
@@ -812,6 +869,20 @@ export default function App() {
         }
         return prevId;
       });
+
+      logAuditEvent({
+        action: 'SESSION_CLOSE',
+        severity: 'INFO',
+        category: 'CLÍNICO',
+        psychologistUid: currentUser?.uid,
+        psychologistName: currentUser?.displayName,
+        psychologistEmail: currentUser?.email || undefined,
+        psychologistLicense: currentUser?.license || undefined,
+        patientId: updated.phoneNumber || updated.id,
+        patientName: updated.userName,
+        sessionId,
+        details: `Caso concluido y archivado para ${updated.userName}. Notas de resolución: "${resolutionNotes.slice(0, 120)}..."`,
+      }).catch(() => {});
 
       const notif: NotificationPayload = {
         title: '✅ Caso Concluido y Archivado',
@@ -886,6 +957,17 @@ export default function App() {
           protectedRouteAttempted={protectedRouteAttempted}
           onLoginSuccess={(user) => {
             setCurrentUser(user);
+            logAuditEvent({
+              action: 'LOGIN',
+              severity: 'INFO',
+              category: 'ACCESOS',
+              psychologistUid: user.uid,
+              psychologistName: user.displayName,
+              psychologistEmail: user.email || undefined,
+              psychologistLicense: user.license || undefined,
+              details: `Inicio de sesión de ${user.displayName} (${user.email || 'sin correo'}). Tarjeta Profesional: ${user.license || 'N/A'}.`,
+            }).catch(() => {});
+
             if (user.isAdmin || user.email === 'kailabwasd@gmail.com') {
               setIsCompletingProfile(false);
             } else {
