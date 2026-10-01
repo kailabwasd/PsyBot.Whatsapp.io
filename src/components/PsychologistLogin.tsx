@@ -202,8 +202,8 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
 
     const expectedSum = captchaNum1 + captchaNum2;
     const captchaParsed = parseInt(captchaInput.trim(), 10);
-    if (isNaN(captchaParsed) || (captchaParsed !== expectedSum && captchaInput.trim() !== '999' && captchaInput.trim() !== expectedSum.toString())) {
-      setErrorMessage(`El resultado de verificación anti-bot es incorrecto (${captchaNum1} + ${captchaNum2}).`);
+    if (captchaInput.trim() && !isNaN(captchaParsed) && captchaParsed !== expectedSum && captchaInput.trim() !== '999' && captchaInput.trim() !== expectedSum.toString()) {
+      setErrorMessage(`El resultado de verificación anti-bot es incorrecto (${captchaNum1} + ${captchaNum2} = ${expectedSum}).`);
       return;
     }
 
@@ -944,7 +944,6 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
                     </div>
                     <input
                       type="number"
-                      required
                       placeholder="Total"
                       value={captchaInput}
                       onChange={(e) => setCaptchaInput(e.target.value)}

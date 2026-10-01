@@ -70,7 +70,8 @@ import {
   createAdminProfile,
   listPsychologistsFromFirestore,
   subscribeToPsychologists,
-  savePsychologistProfile
+  savePsychologistProfile,
+  isSigningIn
 } from './lib/firebase.ts';
 import { onAuthStateChanged } from 'firebase/auth';
 
@@ -312,6 +313,10 @@ export default function App() {
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       clearTimeout(safetyTimer);
+      if (isSigningIn) {
+        // Skip auth state change during active login/registration flow
+        return;
+      }
       if (firebaseUser) {
         // 1. If administrator (kailabwasd@gmail.com)
         if (isUserAdmin(firebaseUser.email)) {

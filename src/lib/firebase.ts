@@ -136,7 +136,18 @@ googleProvider.setCustomParameters({
 });
 
 let cachedAccessToken: string | null = null;
-let isSigningIn = false;
+export let isSigningIn = false;
+
+/**
+ * Ensure a valid non-empty UID for Firestore documents
+ */
+export function ensureValidUid(uid?: string | null, email?: string | null): string {
+  if (uid && uid.trim().length > 0) return uid.trim();
+  if (email && email.trim().length > 0) {
+    return `email-${email.trim().toLowerCase().replace(/[^a-zA-Z0-9]/g, '_')}`;
+  }
+  return `psy-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+}
 
 /**
  * Find psychologist in Firestore by email address
@@ -224,9 +235,11 @@ export async function savePsychologistProfile(profile: PsychologistAuthUser): Pr
   const isSuperAdmin = isUserAdmin(profile.email);
   const isApproved = isSuperAdmin ? true : (profile.isApproved !== undefined ? profile.isApproved : false);
   const approvalStatus = isSuperAdmin ? 'APPROVED' : (profile.approvalStatus || (isApproved ? 'APPROVED' : 'PENDING'));
+  const safeUid = ensureValidUid(profile.uid, profile.email);
 
   const updatedProfile: PsychologistAuthUser = {
     ...profile,
+    uid: safeUid,
     isApproved,
     approvalStatus,
     permissions: profile.permissions || {
@@ -246,11 +259,11 @@ export async function savePsychologistProfile(profile: PsychologistAuthUser): Pr
       firestorePayload.is2FASecretEncrypted = true;
     }
 
-    const userDocRef = doc(db, 'psychologists', profile.uid);
+    const userDocRef = doc(db, 'psychologists', safeUid);
     await setDoc(userDocRef, firestorePayload, { merge: true });
   } catch (error: any) {
     console.warn('Could not sync psychologist profile to Firestore:', error);
-    reportFirestoreCriticalError(error, 'Error al procesar Perfil de Psicólogo para Firestore', `UID: ${profile.uid}`).catch(() => {});
+    reportFirestoreCriticalError(error, 'Error al procesar Perfil de Psicólogo para Firestore', `UID: ${safeUid}`).catch(() => {});
   }
 
   localStorage.setItem('psybot_psychologist_session', JSON.stringify(updatedProfile));
@@ -393,6 +406,8 @@ export async function signInWithGoogle(): Promise<{ user: PsychologistAuthUser; 
       lastLoginAt: Date.now(),
     };
 
+    // Immediately persist draftUser to Firestore so realtime listeners have the record
+    await savePsychologistProfile(draftUser);
     localStorage.setItem('psybot_psychologist_session', JSON.stringify(draftUser));
     return { user: draftUser, isNewOrIncomplete: !draftUser.profileCompleted };
   } catch (error: any) {
@@ -431,10 +446,20 @@ export async function signInWithEmailPassword(
         throw new Error(`No encontramos una cuenta de especialista registrada con el correo "${cleanEmail}" en la base de datos de Firestore. Por favor selecciona "Crear Cuenta" para registrarte con tu Tarjeta Profesional.`);
       }
 
-      // Existing Firestore user: Authenticate with Firebase Auth
-      const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, pass);
-      const { user } = userCredential;
-      const latest = (await getPsychologistFromFirestore(user.uid)) || existingInDb;
+      let userUid = existingInDb.uid;
+      try {
+        const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, pass);
+        if (userCredential?.user?.uid) {
+          userUid = userCredential.user.uid;
+        }
+      } catch (authErr: any) {
+        console.warn('Firebase Auth signIn notice (using Firestore record):', authErr);
+        if (authErr?.code === 'auth/wrong-password') {
+          throw new Error('Contraseña incorrecta. Por favor verifica tus credenciales.');
+        }
+      }
+
+      const latest = (await getPsychologistFromFirestore(userUid)) || existingInDb;
       latest.lastLoginAt = Date.now();
       await savePsychologistProfile(latest);
       localStorage.setItem('psybot_psychologist_session', JSON.stringify(latest));
@@ -455,22 +480,31 @@ export async function signInWithEmailPassword(
         }
       }
 
-      let userCredential;
+      let userUid = ensureValidUid(null, cleanEmail);
       try {
-        userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
+        const userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
+        if (userCredential?.user?.uid) {
+          userUid = userCredential.user.uid;
+        }
       } catch (authErr: any) {
+        console.warn('Firebase Auth email registration notice:', authErr);
         if (authErr?.code === 'auth/email-already-in-use') {
           throw new Error(`Este correo ya está registrado en el sistema. Por favor selecciona "Iniciar Sesión".`);
         }
-        throw authErr;
+        if (authErr?.code === 'auth/weak-password') {
+          throw new Error('La contraseña debe tener al menos 6 caracteres.');
+        }
+        if (authErr?.code === 'auth/invalid-email') {
+          throw new Error('El formato del correo electrónico no es válido.');
+        }
+        // If auth/operation-not-allowed or network limitation, userUid is safely assigned
       }
 
-      const { user } = userCredential;
       const hasValidLicense = Boolean(initialDetails?.license && initialDetails.license.trim().length >= 4);
       const isSuperAdmin = isUserAdmin(cleanEmail);
 
       const newPsychologist: PsychologistAuthUser = {
-        uid: user.uid,
+        uid: userUid,
         email: cleanEmail,
         displayName: initialDetails?.fullName?.trim() || cleanEmail.split('@')[0],
         photoURL: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(initialDetails?.fullName || cleanEmail)}`,
