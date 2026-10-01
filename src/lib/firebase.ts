@@ -588,29 +588,84 @@ export async function signInWithEmailPassword(
 }
 
 /**
- * List real psychologists from Firestore
+ * Helper to consolidate and deduplicate psychologist profiles by email in Firestore
+ */
+async function consolidatePsychologistsDocs(snapshotDocs: Array<{ id: string; data: PsychologistAuthUser }>): Promise<PsychologistAuthUser[]> {
+  const emailMap = new Map<string, { docId: string; user: PsychologistAuthUser }[]>();
+
+  for (const item of snapshotDocs) {
+    const user = item.data;
+    if (!user || !user.email) continue;
+    const cleanEmail = user.email.trim().toLowerCase();
+    if (!emailMap.has(cleanEmail)) {
+      emailMap.set(cleanEmail, []);
+    }
+    emailMap.get(cleanEmail)!.push({ docId: item.id, user });
+  }
+
+  const consolidatedList: PsychologistAuthUser[] = [];
+
+  for (const [email, entries] of emailMap.entries()) {
+    // Sort entries to keep the most complete/admin/approved one as primary
+    entries.sort((a, b) => {
+      const scoreA = (a.user.isAdmin ? 10 : 0) + (a.user.isApproved ? 5 : 0) + (a.user.profileCompleted ? 3 : 0) + (a.user.lastLoginAt || 0) / 1e12;
+      const scoreB = (b.user.isAdmin ? 10 : 0) + (b.user.isApproved ? 5 : 0) + (b.user.profileCompleted ? 3 : 0) + (b.user.lastLoginAt || 0) / 1e12;
+      return scoreB - scoreA;
+    });
+
+    const primary = entries[0];
+    let mergedUser = { ...primary.user };
+
+    // Merge any missing fields from duplicate entries
+    for (let i = 1; i < entries.length; i++) {
+      const dup = entries[i].user;
+      if (!mergedUser.license && dup.license) mergedUser.license = dup.license;
+      if (!mergedUser.phone && dup.phone) mergedUser.phone = dup.phone;
+      if (!mergedUser.specialty && dup.specialty) mergedUser.specialty = dup.specialty;
+      if (!mergedUser.institution && dup.institution) mergedUser.institution = dup.institution;
+      if (!mergedUser.isApproved && dup.isApproved) mergedUser.isApproved = dup.isApproved;
+      if (dup.isAdmin) mergedUser.isAdmin = true;
+      if (dup.approvalStatus === 'APPROVED') mergedUser.approvalStatus = 'APPROVED';
+
+      // Delete duplicate document from Firestore in background to keep DB clean
+      deleteDoc(doc(db, 'psychologists', entries[i].docId)).catch(() => {});
+    }
+
+    if (isUserAdmin(email)) {
+      mergedUser.isAdmin = true;
+      mergedUser.isApproved = true;
+      mergedUser.approvalStatus = 'APPROVED';
+      mergedUser.profileCompleted = true;
+    }
+
+    consolidatedList.push(mergedUser);
+  }
+
+  // Ensure system administrators are always present
+  for (const adminEmail of ADMIN_EMAILS) {
+    if (!consolidatedList.some(p => p.email && p.email.trim().toLowerCase() === adminEmail.toLowerCase())) {
+      const admin = createAdminProfile(adminEmail, `Administrador Clínico (${adminEmail})`, undefined);
+      consolidatedList.unshift(admin);
+      setDoc(doc(db, 'psychologists', admin.uid), admin, { merge: true }).catch(() => {});
+    }
+  }
+
+  return consolidatedList;
+}
+
+/**
+ * List real psychologists from Firestore with automatic deduplication
  */
 export async function listPsychologistsFromFirestore(): Promise<PsychologistAuthUser[]> {
   try {
     const colRef = collection(db, 'psychologists');
     const snapshot = await getDocs(colRef);
-    const list: PsychologistAuthUser[] = [];
-    snapshot.forEach((docSnap: DocumentData) => {
-      const data = docSnap.data() as PsychologistAuthUser;
-      if (data && data.email) {
-        list.push(data);
-      }
+    const docsArray: Array<{ id: string; data: PsychologistAuthUser }> = [];
+    snapshot.forEach((docSnap) => {
+      docsArray.push({ id: docSnap.id, data: docSnap.data() as PsychologistAuthUser });
     });
 
-    // Ensure the system administrator is in the list
-    if (!list.some(p => p.email === 'kailabwasd@gmail.com')) {
-      const admin = createAdminProfile('kailabwasd@gmail.com', 'Administrador Clínico (kailabwasd)', undefined);
-      list.unshift(admin);
-      // Persist in background to Firestore
-      setDoc(doc(db, 'psychologists', admin.uid), admin, { merge: true }).catch(() => {});
-    }
-
-    return list;
+    return await consolidatePsychologistsDocs(docsArray);
   } catch (err: any) {
     console.warn('Could not fetch psychologists list, using local cache:', err);
     reportFirestoreCriticalError(err, 'Listar Psicólogos desde Firestore', 'psychologists').catch(() => {});
@@ -619,23 +674,17 @@ export async function listPsychologistsFromFirestore(): Promise<PsychologistAuth
 }
 
 /**
- * Subscribe to real-time updates of psychologists in Firestore
+ * Subscribe to real-time updates of psychologists in Firestore with consolidation
  */
 export function subscribeToPsychologists(callback: (list: PsychologistAuthUser[]) => void): () => void {
   const colRef = collection(db, 'psychologists');
-  return onSnapshot(colRef, (snapshot) => {
-    const list: PsychologistAuthUser[] = [];
+  return onSnapshot(colRef, async (snapshot) => {
+    const docsArray: Array<{ id: string; data: PsychologistAuthUser }> = [];
     snapshot.forEach((docSnap) => {
-      const data = docSnap.data() as PsychologistAuthUser;
-      if (data && data.email) {
-        list.push(data);
-      }
+      docsArray.push({ id: docSnap.id, data: docSnap.data() as PsychologistAuthUser });
     });
 
-    if (!list.some(p => p.email === 'kailabwasd@gmail.com')) {
-      list.unshift(createAdminProfile('kailabwasd@gmail.com', 'Administrador Clínico (kailabwasd)', undefined));
-    }
-
+    const list = await consolidatePsychologistsDocs(docsArray);
     callback(list);
   }, (err) => {
     console.warn('Real-time psychologists subscription warning:', err);
