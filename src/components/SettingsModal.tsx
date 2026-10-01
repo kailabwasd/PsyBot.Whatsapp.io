@@ -1195,14 +1195,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         Firestore: /psychologists
                       </span>
                     </p>
-                    {allPsychologists.filter(p => !p.isAdmin && (p.approvalStatus === 'PENDING' || p.isApproved === false)).length > 0 && (
+                    {allPsychologists.filter(p => !p.isAdmin && (p.approvalStatus === 'PENDING' || (p.isApproved === false && p.approvalStatus !== 'REJECTED'))).length > 0 && (
                       <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-bold animate-pulse">
-                        ⚠️ {allPsychologists.filter(p => !p.isAdmin && (p.approvalStatus === 'PENDING' || p.isApproved === false)).length} solicitudes pendientes
+                        ⚠️ {allPsychologists.filter(p => !p.isAdmin && (p.approvalStatus === 'PENDING' || (p.isApproved === false && p.approvalStatus !== 'REJECTED'))).length} solicitudes pendientes
                       </span>
                     )}
                   </div>
                   <p className="text-slate-300 text-xs leading-relaxed">
-                    Como Administrador Clínico, eres el responsable de <strong className="text-amber-300">autorizar el acceso a la web</strong> a los psicólogos que se registran. Revisa su Tarjeta Profesional (ReTHUS) y asigna sus permisos clínicos de atención.
+                    Como Administrador Clínico, eres el responsable de <strong className="text-amber-300">autorizar el acceso a la web</strong> a los nuevos psicólogos que se registran. Revisa su Tarjeta Profesional (ReTHUS) y asigna sus permisos clínicos de atención.
                   </p>
                 </div>
               </div>
@@ -1232,7 +1232,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     }`}
                   >
                     <Clock className="w-3.5 h-3.5" />
-                    <span>Pendientes ({allPsychologists.filter(p => !p.isAdmin && (p.approvalStatus === 'PENDING' || p.isApproved === false)).length})</span>
+                    <span>Pendientes ({allPsychologists.filter(p => !p.isAdmin && (p.approvalStatus === 'PENDING' || (p.isApproved === false && p.approvalStatus !== 'REJECTED'))).length})</span>
                   </button>
 
                   <button
@@ -1266,7 +1266,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               {/* Lista de Psicólogos con asignación e información completa */}
               <div className="space-y-4">
                 {allPsychologists.filter(p => {
-                  if (psychApprovalFilter === 'PENDING') return !p.isAdmin && (p.approvalStatus === 'PENDING' || p.isApproved === false);
+                  if (psychApprovalFilter === 'PENDING') return !p.isAdmin && (p.approvalStatus === 'PENDING' || (p.isApproved === false && p.approvalStatus !== 'REJECTED'));
                   if (psychApprovalFilter === 'APPROVED') return p.isAdmin || p.approvalStatus === 'APPROVED' || p.isApproved === true;
                   if (psychApprovalFilter === 'REJECTED') return p.approvalStatus === 'REJECTED';
                   return true;
@@ -1278,7 +1278,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
                 ) : (
                   allPsychologists.filter(p => {
-                    if (psychApprovalFilter === 'PENDING') return !p.isAdmin && (p.approvalStatus === 'PENDING' || p.isApproved === false);
+                    if (psychApprovalFilter === 'PENDING') return !p.isAdmin && (p.approvalStatus === 'PENDING' || (p.isApproved === false && p.approvalStatus !== 'REJECTED'));
                     if (psychApprovalFilter === 'APPROVED') return p.isAdmin || p.approvalStatus === 'APPROVED' || p.isApproved === true;
                     if (psychApprovalFilter === 'REJECTED') return p.approvalStatus === 'REJECTED';
                     return true;
@@ -1286,7 +1286,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     const draft = getPsychDraft(psych);
                     const isProtectedOwner = psych.email === 'kailabwasd@gmail.com';
                     const isApprovedUser = isProtectedOwner || psych.approvalStatus === 'APPROVED' || psych.isApproved === true;
-                    const isPendingUser = !isProtectedOwner && (psych.approvalStatus === 'PENDING' || psych.isApproved === false);
+                    const isPendingUser = !isProtectedOwner && (psych.approvalStatus === 'PENDING' || (psych.isApproved === false && psych.approvalStatus !== 'REJECTED'));
                     const isRejectedUser = !isProtectedOwner && psych.approvalStatus === 'REJECTED';
 
                     return (

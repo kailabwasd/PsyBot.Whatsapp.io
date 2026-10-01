@@ -92,9 +92,9 @@ export default function App() {
   const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'subatech'>('subatech');
   const [allPsychologists, setAllPsychologists] = useState<PsychologistAuthUser[]>([]);
 
-  // Count of psychologists waiting for Administrator authorization
+  // Count of psychologists waiting for Administrator authorization (only newly registered accounts in PENDING status)
   const pendingApprovalsCount = allPsychologists.filter(
-    p => !p.isAdmin && p.email !== 'kailabwasd@gmail.com' && (p.approvalStatus === 'PENDING' || p.isApproved === false)
+    p => !p.isAdmin && p.email !== 'kailabwasd@gmail.com' && (p.approvalStatus === 'PENDING' || (p.isApproved === false && p.approvalStatus !== 'REJECTED'))
   ).length;
 
   // Routing and Subdomain Navigation State

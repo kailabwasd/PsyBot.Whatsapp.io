@@ -552,7 +552,8 @@ setInterval(syncTwilioInboundMessages, 2500);
 // Helper: Send message to patient WhatsApp via Twilio REST API
 async function sendTwilioWhatsAppMessage(
   toPhoneNumber: string, 
-  messageBody: string
+  messageBody: string,
+  isInternalAlert: boolean = false
 ): Promise<{ success: boolean; sid?: string; error?: string; errorCode?: number; isSimulated?: boolean }> {
   // Validate recipient phone format
   const formattedTo = sanitizeWhatsAppNumber(toPhoneNumber);
@@ -571,13 +572,15 @@ async function sendTwilioWhatsAppMessage(
   if (!accountSid || !authToken || !whatsappNumber) {
     console.warn('[Twilio] Missing Twilio credentials, skipping outbound WhatsApp API dispatch.');
     const errorMsg = 'Credenciales de Twilio incompletas en el servidor. Configura TWILIO_ACCOUNT_SID y TWILIO_AUTH_TOKEN en Railway o en la Configuración de Administrador.';
-    recordSystemError({
-      service: 'TWILIO',
-      title: 'Credenciales de Twilio Incompletas',
-      details: errorMsg,
-      targetPhone: formattedTo,
-      suggestion: 'Configura las variables TWILIO_ACCOUNT_SID y TWILIO_AUTH_TOKEN en Railway o en la pestaña "Errores & Twilio" del panel de Administrador.',
-    });
+    if (!isInternalAlert) {
+      recordSystemError({
+        service: 'TWILIO',
+        title: 'Credenciales de Twilio Incompletas',
+        details: errorMsg,
+        targetPhone: formattedTo,
+        suggestion: 'Configura las variables TWILIO_ACCOUNT_SID y TWILIO_AUTH_TOKEN en Railway o en la pestaña "Errores & Twilio" del panel de Administrador.',
+      });
+    }
     return { 
       success: false, 
       error: errorMsg 
@@ -633,18 +636,20 @@ async function sendTwilioWhatsAppMessage(
 
       console.error(`[Twilio Error ${response.status}] No se pudo enviar WhatsApp a ${formattedTo}:`, parsedMessage);
 
-      // Record in system error logs
-      recordSystemError({
-        service: 'TWILIO',
-        title: errorCode === 20003 || response.status === 401 
-          ? 'Twilio Error 20003: 401 Unauthorized (Auth Token Inválido)' 
-          : `Twilio Error ${errorCode || response.status}`,
-        details: parsedMessage,
-        errorCode: errorCode || response.status,
-        statusCode: response.status,
-        targetPhone: formattedTo,
-        suggestion,
-      });
+      // Record in system error logs only if not an internal notification alert to prevent cascade
+      if (!isInternalAlert) {
+        recordSystemError({
+          service: 'TWILIO',
+          title: errorCode === 20003 || response.status === 401 
+            ? 'Twilio Error 20003: 401 Unauthorized (Auth Token Inválido)' 
+            : `Twilio Error ${errorCode || response.status}`,
+          details: parsedMessage,
+          errorCode: errorCode || response.status,
+          statusCode: response.status,
+          targetPhone: formattedTo,
+          suggestion,
+        });
+      }
 
       return { success: false, error: parsedMessage, errorCode };
     }
@@ -655,13 +660,15 @@ async function sendTwilioWhatsAppMessage(
   } catch (err: any) {
     console.error('[Twilio] Network/Server exception while dispatching WhatsApp message:', err);
     const errorMsg = err?.message || 'Error de conexión con Twilio API';
-    recordSystemError({
-      service: 'TWILIO',
-      title: 'Error de Red / Conexión con Twilio',
-      details: errorMsg,
-      targetPhone: formattedTo,
-      suggestion: 'Verifica la conexión a internet del servidor o la disponibilidad de los servicios de Twilio.',
-    });
+    if (!isInternalAlert) {
+      recordSystemError({
+        service: 'TWILIO',
+        title: 'Error de Red / Conexión con Twilio',
+        details: errorMsg,
+        targetPhone: formattedTo,
+        suggestion: 'Verifica la conexión de red del servidor y el estado de la API de Twilio.',
+      });
+    }
     return { success: false, error: errorMsg };
   }
 }
@@ -692,6 +699,11 @@ notifyAdminErrorAlert = async (newLog: SystemErrorLog) => {
   if (isSendingAdminAlert) return;
   if (!ADMIN_NOTIFICATIONS_CONFIG.enableErrorAlerts) return;
   
+  // NEVER attempt to dispatch WhatsApp alerts via Twilio if Twilio itself is what failed or has 401 Unauthorized
+  if (newLog.service === 'TWILIO' || newLog.errorCode === 20003 || newLog.statusCode === 401) {
+    return;
+  }
+
   // Debounce to at most 1 alert every 10 seconds to avoid flooding
   if (Date.now() - lastErrorAlertTimestamp < 10000) return;
 
@@ -717,7 +729,7 @@ notifyAdminErrorAlert = async (newLog: SystemErrorLog) => {
     ].filter(Boolean).join('\n');
 
     console.log(`[Admin Alert] Dispatching error alert to ${target}: ${newLog.title}`);
-    await sendTwilioWhatsAppMessage(target, alertMessage);
+    await sendTwilioWhatsAppMessage(target, alertMessage, true);
   } catch (err) {
     console.warn('[Admin Alert] Failed to dispatch error alert to admin:', err);
   } finally {
@@ -772,7 +784,7 @@ async function generateAndSendPeriodicStatusReport(): Promise<{ success: boolean
   
   isSendingAdminAlert = true;
   try {
-    const res = await sendTwilioWhatsAppMessage(target, report);
+    const res = await sendTwilioWhatsAppMessage(target, report, true);
     return { success: res.success, message: res.success ? 'Reporte enviado con éxito' : res.error };
   } catch (err: any) {
     return { success: false, message: err?.message || 'Error de despacho' };

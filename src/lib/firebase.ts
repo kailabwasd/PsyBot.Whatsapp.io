@@ -27,7 +27,7 @@ import {
   type DocumentData
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import type { PsychologistAuthUser, PsychologistPermissions } from '../types/index.ts';
+import type { PsychologistAuthUser, PsychologistPermissions, UserApprovalStatus } from '../types/index.ts';
 import { encryptSecret, decryptSecret } from './cryptoUtils.ts';
 import { generateSecret, generateURI, verifySync } from 'otplib';
 import qrcode from 'qrcode';
@@ -233,8 +233,36 @@ export async function getPsychologistFromFirestore(uid: string): Promise<Psychol
  */
 export async function savePsychologistProfile(profile: PsychologistAuthUser): Promise<PsychologistAuthUser> {
   const isSuperAdmin = isUserAdmin(profile.email);
-  const isApproved = isSuperAdmin ? true : (profile.isApproved !== undefined ? profile.isApproved : false);
-  const approvalStatus = isSuperAdmin ? 'APPROVED' : (profile.approvalStatus || (isApproved ? 'APPROVED' : 'PENDING'));
+  
+  // Validation applies exclusively to new accounts:
+  // - Super Admin (kailabwasd@gmail.com) has unconditional approved access
+  // - Explicit 'PENDING' (from new registrations) or 'REJECTED' is respected
+  // - Explicit 'APPROVED' is respected
+  // - For existing accounts or profiles where approvalStatus is undefined, default to APPROVED
+  let isApproved: boolean;
+  let approvalStatus: UserApprovalStatus;
+
+  if (isSuperAdmin) {
+    isApproved = true;
+    approvalStatus = 'APPROVED';
+  } else if (profile.approvalStatus === 'PENDING') {
+    isApproved = false;
+    approvalStatus = 'PENDING';
+  } else if (profile.approvalStatus === 'REJECTED') {
+    isApproved = false;
+    approvalStatus = 'REJECTED';
+  } else if (profile.approvalStatus === 'APPROVED') {
+    isApproved = true;
+    approvalStatus = 'APPROVED';
+  } else if (profile.isApproved === false) {
+    isApproved = false;
+    approvalStatus = 'PENDING';
+  } else {
+    // Existing accounts or accounts with isApproved undefined / true: automatically approved
+    isApproved = true;
+    approvalStatus = 'APPROVED';
+  }
+
   const safeUid = ensureValidUid(profile.uid, profile.email);
 
   const updatedProfile: PsychologistAuthUser = {
@@ -379,8 +407,14 @@ export async function signInWithGoogle(): Promise<{ user: PsychologistAuthUser; 
       return { user: existing, isNewOrIncomplete: false };
     }
 
-    // Prepare draft user requiring profile completion (Tarjeta Profesional / ReTHUS) and admin authorization
+    // Prepare draft user: if brand new account, require admin approval (PENDING). If existing account, preserve approval.
     const isSuperAdmin = isUserAdmin(user.email);
+    const isNewGoogleUser = !existing;
+    const isApprovedGoogle = isSuperAdmin ? true : (isNewGoogleUser ? false : (existing?.isApproved ?? true));
+    const approvalStatusGoogle: UserApprovalStatus = isSuperAdmin 
+      ? 'APPROVED' 
+      : (isNewGoogleUser ? 'PENDING' : (existing?.approvalStatus ?? 'APPROVED'));
+
     const draftUser: PsychologistAuthUser = {
       uid: user.uid,
       email: user.email || '',
@@ -394,12 +428,12 @@ export async function signInWithGoogle(): Promise<{ user: PsychologistAuthUser; 
       phone: existing?.phone || '',
       termsAccepted: existing?.termsAccepted ?? true,
       profileCompleted: Boolean(existing?.license?.trim()),
-      isApproved: isSuperAdmin ? true : (existing?.isApproved ?? false),
-      approvalStatus: isSuperAdmin ? 'APPROVED' : (existing?.approvalStatus ?? 'PENDING'),
+      isApproved: isApprovedGoogle,
+      approvalStatus: approvalStatusGoogle,
       isAdmin: isSuperAdmin,
       permissions: {
-        lectura: isSuperAdmin || Boolean(existing?.isApproved),
-        escritura: isSuperAdmin || Boolean(existing?.isApproved),
+        lectura: isSuperAdmin || Boolean(isApprovedGoogle),
+        escritura: isSuperAdmin || Boolean(isApprovedGoogle),
         administrativo: isSuperAdmin,
       },
       createdAt: existing?.createdAt || Date.now(),

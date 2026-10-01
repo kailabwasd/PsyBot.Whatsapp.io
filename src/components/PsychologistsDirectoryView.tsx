@@ -254,7 +254,7 @@ export const PsychologistsDirectoryView: React.FC<PsychologistsDirectoryViewProp
 
     let matchesApproval = true;
     if (approvalFilter === 'PENDING') {
-      matchesApproval = !psych.isAdmin && psych.email !== 'kailabwasd@gmail.com' && (psych.approvalStatus === 'PENDING' || psych.isApproved === false);
+      matchesApproval = !psych.isAdmin && psych.email !== 'kailabwasd@gmail.com' && (psych.approvalStatus === 'PENDING' || (psych.isApproved === false && psych.approvalStatus !== 'REJECTED'));
     } else if (approvalFilter === 'APPROVED') {
       matchesApproval = psych.isAdmin || psych.email === 'kailabwasd@gmail.com' || psych.approvalStatus === 'APPROVED' || psych.isApproved === true;
     } else if (approvalFilter === 'REJECTED') {
@@ -420,7 +420,7 @@ export const PsychologistsDirectoryView: React.FC<PsychologistsDirectoryViewProp
               }`}
             >
               <Clock className="w-3.5 h-3.5" />
-              <span>Pendientes ({allPsychologists.filter(p => !p.isAdmin && p.email !== 'kailabwasd@gmail.com' && (p.approvalStatus === 'PENDING' || p.isApproved === false)).length})</span>
+              <span>Pendientes ({allPsychologists.filter(p => !p.isAdmin && p.email !== 'kailabwasd@gmail.com' && (p.approvalStatus === 'PENDING' || (p.isApproved === false && p.approvalStatus !== 'REJECTED'))).length})</span>
             </button>
 
             <button
@@ -452,7 +452,7 @@ export const PsychologistsDirectoryView: React.FC<PsychologistsDirectoryViewProp
             const isMe = Boolean(currentUser && psych.uid === currentUser.uid);
             const isProtectedAdmin = psych.isAdmin || psych.email === 'kailabwasd@gmail.com';
             const isApproved = isProtectedAdmin || psych.approvalStatus === 'APPROVED' || psych.isApproved === true;
-            const isPending = !isProtectedAdmin && (psych.approvalStatus === 'PENDING' || psych.isApproved === false);
+            const isPending = !isProtectedAdmin && (psych.approvalStatus === 'PENDING' || (psych.isApproved === false && psych.approvalStatus !== 'REJECTED'));
             const isRejected = !isProtectedAdmin && psych.approvalStatus === 'REJECTED';
 
             const perms = psych.permissions || {
