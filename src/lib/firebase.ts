@@ -12,6 +12,9 @@ import {
 } from 'firebase/auth';
 import { 
   getFirestore, 
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   doc, 
   setDoc, 
   getDoc, 
@@ -33,8 +36,21 @@ export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfi
 // Initialize Firebase Auth
 export const auth = getAuth(app);
 
-// Initialize Cloud Firestore
-export const db = getFirestore(app);
+// Initialize Cloud Firestore with High-Performance Multi-Tab IndexedDB Local Cache
+let firestoreDb;
+try {
+  firestoreDb = initializeFirestore(app, {
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager()
+    })
+  });
+  console.log('[Firestore Turbo] IndexedDB multi-tab cache initialized for instant 0ms loads.');
+} catch (err) {
+  // Fallback to standard instance if already initialized by HMR
+  firestoreDb = getFirestore(app);
+}
+
+export const db = firestoreDb;
 
 /**
  * Generate a new TOTP secret and QR code data URL for 2FA setup

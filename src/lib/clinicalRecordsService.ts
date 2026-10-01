@@ -18,10 +18,65 @@ const RECORDS_COLLECTION = 'clinical_records';
 const SESSIONS_COLLECTION = 'active_sessions';
 
 // ==============================================================================
-// OPTIMISTIC IN-MEMORY CACHE & REAL-TIME EVENT DISTRIBUTOR
+// OPTIMISTIC IN-MEMORY CACHE & REAL-TIME EVENT DISTRIBUTOR (TURBO 0ms)
 // ==============================================================================
-const optimisticRecordCache = new Map<string, ClinicalRecord>();
-const optimisticSessionCache = new Map<string, PatientSession>();
+const RECORD_CACHE_STORAGE_KEY = 'psybot_clinical_records_instant_cache';
+const SESSION_CACHE_STORAGE_KEY = 'psybot_active_sessions_instant_cache';
+
+function loadInitialRecordCache(): Map<string, ClinicalRecord> {
+  const map = new Map<string, ClinicalRecord>();
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(RECORD_CACHE_STORAGE_KEY);
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) {
+          arr.forEach((r: ClinicalRecord) => {
+            if (r && r.id) map.set(r.id, r);
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Record cache load warning:', e);
+    }
+  }
+  return map;
+}
+
+function loadInitialSessionCache(): Map<string, PatientSession> {
+  const map = new Map<string, PatientSession>();
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(SESSION_CACHE_STORAGE_KEY) || 
+                  localStorage.getItem('psybot_active_sessions_cache');
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) {
+          arr.forEach((s: PatientSession) => {
+            if (s && s.id) {
+              const normId = s.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+              map.set(normId, s);
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Session cache load warning:', e);
+    }
+  }
+  return map;
+}
+
+const optimisticRecordCache = loadInitialRecordCache();
+const optimisticSessionCache = loadInitialSessionCache();
+
+export function getInitialRecordsSync(): ClinicalRecord[] {
+  return Array.from(optimisticRecordCache.values()).sort((a, b) => (b.lastUpdated || 0) - (a.lastUpdated || 0));
+}
+
+export function getInitialSessionsSync(): PatientSession[] {
+  return Array.from(optimisticSessionCache.values()).sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0));
+}
 
 type RecordSubscriber = (records: ClinicalRecord[]) => void;
 type SessionSubscriber = (sessions: PatientSession[]) => void;
@@ -31,6 +86,11 @@ const sessionSubscribers = new Set<SessionSubscriber>();
 
 function notifyRecordSubscribers() {
   const sorted = Array.from(optimisticRecordCache.values()).sort((a, b) => (b.lastUpdated || 0) - (a.lastUpdated || 0));
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(RECORD_CACHE_STORAGE_KEY, JSON.stringify(sorted));
+    } catch {}
+  }
   recordSubscribers.forEach((cb) => {
     try { cb(sorted); } catch (e) { console.warn('Record subscriber notification error:', e); }
   });
@@ -38,6 +98,12 @@ function notifyRecordSubscribers() {
 
 function notifySessionSubscribers() {
   const sorted = Array.from(optimisticSessionCache.values()).sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0));
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(SESSION_CACHE_STORAGE_KEY, JSON.stringify(sorted));
+      localStorage.setItem('psybot_active_sessions_cache', JSON.stringify(sorted));
+    } catch {}
+  }
   sessionSubscribers.forEach((cb) => {
     try { cb(sorted); } catch (e) { console.warn('Session subscriber notification error:', e); }
   });
@@ -271,23 +337,31 @@ export async function syncSessionToFirestoreClinicalRecord(session: PatientSessi
 }
 
 /**
- * Fetch all clinical records from Firestore, populating local optimistic cache
+ * Fetch all clinical records from Firestore, returning instant 0ms cache and background streaming
  */
 export async function getAllClinicalRecordsFromFirestore(): Promise<ClinicalRecord[]> {
-  try {
-    const q = query(collection(db, RECORDS_COLLECTION), orderBy('lastUpdated', 'desc'));
-    const snapshot = await getDocs(q);
-    const records = snapshot.docs.map((docSnap) => docSnap.data() as ClinicalRecord);
+  const cached = getInitialRecordsSync();
 
-    // Populate local cache
-    records.forEach((r) => optimisticRecordCache.set(r.id, r));
-    notifyRecordSubscribers();
+  // Background non-blocking refresh from Firestore
+  const fetchPromise = (async () => {
+    try {
+      const q = query(collection(db, RECORDS_COLLECTION), orderBy('lastUpdated', 'desc'));
+      const snapshot = await getDocs(q);
+      const records = snapshot.docs.map((docSnap) => docSnap.data() as ClinicalRecord);
 
-    return records;
-  } catch (err) {
-    console.error('Error fetching clinical records from Firestore:', err);
-    return Array.from(optimisticRecordCache.values()).sort((a, b) => (b.lastUpdated || 0) - (a.lastUpdated || 0));
+      records.forEach((r) => optimisticRecordCache.set(r.id, r));
+      notifyRecordSubscribers();
+      return records;
+    } catch (err) {
+      console.warn('Error fetching clinical records from Firestore:', err);
+      return cached;
+    }
+  })();
+
+  if (cached.length > 0) {
+    return cached;
   }
+  return fetchPromise;
 }
 
 /**
@@ -296,10 +370,10 @@ export async function getAllClinicalRecordsFromFirestore(): Promise<ClinicalReco
 export function subscribeToClinicalRecords(callback: (records: ClinicalRecord[]) => void): () => void {
   recordSubscribers.add(callback);
 
-  // Send current cached state immediately
-  if (optimisticRecordCache.size > 0) {
-    const sorted = Array.from(optimisticRecordCache.values()).sort((a, b) => (b.lastUpdated || 0) - (a.lastUpdated || 0));
-    callback(sorted);
+  // Send current cached state immediately (0ms)
+  const initialData = getInitialRecordsSync();
+  if (initialData.length > 0) {
+    callback(initialData);
   }
 
   const q = query(collection(db, RECORDS_COLLECTION), orderBy('lastUpdated', 'desc'));
@@ -346,26 +420,33 @@ export async function saveActiveSessionToFirestore(session: PatientSession): Pro
 }
 
 /**
- * Fetch all active patient chat sessions from Firestore, populating local optimistic cache
+ * Fetch all active patient chat sessions from Firestore with instant 0ms cached return
  */
 export async function getActiveSessionsFromFirestore(): Promise<PatientSession[]> {
-  try {
-    const q = query(collection(db, SESSIONS_COLLECTION), orderBy('lastActivityAt', 'desc'));
-    const snapshot = await getDocs(q);
-    const sessions = snapshot.docs.map((docSnap) => docSnap.data() as PatientSession);
+  const cached = getInitialSessionsSync();
 
-    sessions.forEach((s) => {
-      const normId = s.id.replace(/[^a-zA-Z0-9_-]/g, '_');
-      optimisticSessionCache.set(normId, s);
-    });
-    notifySessionSubscribers();
+  const fetchPromise = (async () => {
+    try {
+      const q = query(collection(db, SESSIONS_COLLECTION), orderBy('lastActivityAt', 'desc'));
+      const snapshot = await getDocs(q);
+      const sessions = snapshot.docs.map((docSnap) => docSnap.data() as PatientSession);
 
-    return sessions;
-  } catch (err: any) {
-    console.error('Error fetching active sessions from Firestore:', err);
-    reportFirestoreCriticalError(err, 'Cargar Sesiones Activas desde Firestore', SESSIONS_COLLECTION).catch(() => {});
-    return Array.from(optimisticSessionCache.values()).sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0));
+      sessions.forEach((s) => {
+        const normId = s.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+        optimisticSessionCache.set(normId, s);
+      });
+      notifySessionSubscribers();
+      return sessions;
+    } catch (err: any) {
+      console.warn('Error fetching active sessions from Firestore:', err);
+      return cached;
+    }
+  })();
+
+  if (cached.length > 0) {
+    return cached;
   }
+  return fetchPromise;
 }
 
 /**
@@ -374,10 +455,10 @@ export async function getActiveSessionsFromFirestore(): Promise<PatientSession[]
 export function subscribeToActiveSessions(callback: (sessions: PatientSession[]) => void): () => void {
   sessionSubscribers.add(callback);
 
-  // Send cached state immediately
-  if (optimisticSessionCache.size > 0) {
-    const sorted = Array.from(optimisticSessionCache.values()).sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0));
-    callback(sorted);
+  // Send cached state immediately (0ms)
+  const initialSessions = getInitialSessionsSync();
+  if (initialSessions.length > 0) {
+    callback(initialSessions);
   }
 
   const q = query(collection(db, SESSIONS_COLLECTION), orderBy('lastActivityAt', 'desc'));

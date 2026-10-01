@@ -48,7 +48,8 @@ import {
   getActiveSessionsFromFirestore, 
   subscribeToActiveSessions,
   deleteActiveSessionFromFirestore,
-  deleteAllActiveSessionsFromFirestore
+  deleteAllActiveSessionsFromFirestore,
+  getInitialSessionsSync
 } from './lib/clinicalRecordsService.ts';
 import { AppRoute, parseCurrentRoute, navigateTo, normalizeRoute } from './lib/router.ts';
 import { applyAccessibilitySettings, getStoredAccessibilitySettings } from './lib/accessibility.ts';
@@ -98,7 +99,21 @@ export default function App() {
     if (route === 'supervisor') return 'SUPERVISOR';
     return 'QUEUE';
   });
-  const [sessions, setSessions] = useState<PatientSession[]>([]);
+  const [sessions, setSessions] = useState<PatientSession[]>(() => {
+    const instant = getInitialSessionsSync();
+    if (instant.length > 0) return instant;
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('psybot_active_sessions_instant_cache') || 
+                       localStorage.getItem('psybot_active_sessions_cache');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch (e) {}
+    }
+    return [];
+  });
   const [activeSessionId, setActiveSessionId] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('psybot_active_session_id') || null;
@@ -117,7 +132,7 @@ export default function App() {
   const [previewModalSession, setPreviewModalSession] = useState<PatientSession | null>(null);
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [isRegistrationModalOpen, setIsRegistrationModalOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(() => sessions.length === 0);
 
   const handleRegisterNewPatient = async (data: { name: string; age: number; gender: string; phone: string }) => {
     const now = Date.now();

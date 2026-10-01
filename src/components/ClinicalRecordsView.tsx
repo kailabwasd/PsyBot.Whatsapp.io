@@ -25,7 +25,8 @@ import {
   Edit3,
   ClipboardCheck,
   AlertCircle,
-  Quote
+  Quote,
+  Zap
 } from 'lucide-react';
 import type { ClinicalRecord, PatientSession, PsychologistAuthUser, RiskLevel } from '../types';
 import { SubaTechLogo } from './SubaTechLogo.tsx';
@@ -35,7 +36,8 @@ import {
   saveClinicalRecordToFirestore, 
   syncSessionToFirestoreClinicalRecord,
   subscribeToClinicalRecords,
-  generatePsychologistAccessLink
+  generatePsychologistAccessLink,
+  getInitialRecordsSync
 } from '../lib/clinicalRecordsService';
 import { exportClinicalRecordToPDF } from '../lib/pdfExportService';
 import { 
@@ -79,11 +81,18 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
   onSelectRecord,
   currentUser,
 }) => {
-  const [records, setRecords] = useState<ClinicalRecord[]>([]);
-  const [selectedRecord, setSelectedRecord] = useState<ClinicalRecord | null>(null);
+  const initialData = getInitialRecordsSync();
+  const [records, setRecords] = useState<ClinicalRecord[]>(initialData);
+  const [selectedRecord, setSelectedRecord] = useState<ClinicalRecord | null>(() => {
+    if (initialSelectedRecordId && initialData.length > 0) {
+      const match = initialData.find(r => r.id === initialSelectedRecordId);
+      if (match) return match;
+    }
+    return initialData[0] || null;
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [filterRisk, setFilterRisk] = useState<string>('ALL');
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(initialData.length === 0);
   const [isSaving, setIsSaving] = useState(false);
   const [isExportingPDF, setIsExportingPDF] = useState(false);
   const [pdfSuccessNotice, setPdfSuccessNotice] = useState(false);
@@ -128,27 +137,31 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
     return () => unsubscribe();
   }, []);
 
-  // 2. Load and synchronize records with Firestore
+  // 2. Load and synchronize records with Firestore (Turbo 0ms & Live Streaming)
   useEffect(() => {
     let isMounted = true;
 
     async function loadAndSync() {
-      setIsLoading(true);
       try {
-        // Sync any active sessions into Firestore so records are always fresh
-        for (const s of sessions) {
-          await syncSessionToFirestoreClinicalRecord(s);
+        // Parallel non-blocking sync of sessions to clinical records in background
+        if (sessions.length > 0) {
+          Promise.all(sessions.map(s => syncSessionToFirestoreClinicalRecord(s))).catch(() => {});
         }
 
         const data = await getAllClinicalRecordsFromFirestore();
-        if (isMounted) {
+        if (isMounted && data.length > 0) {
           setRecords(data);
-          if (data.length > 0) {
+          setIsLoading(false);
+          setSelectedRecord((prev) => {
+            if (prev) {
+              const fresh = data.find(r => r.id === prev.id);
+              return fresh || prev;
+            }
             const matched = initialSelectedRecordId 
               ? data.find(r => r.id === initialSelectedRecordId) 
               : data[0];
-            setSelectedRecord(matched || data[0]);
-          }
+            return matched || data[0];
+          });
         }
       } catch (err) {
         console.error('Error synchronizing Firestore clinical records:', err);
@@ -159,10 +172,16 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
 
     loadAndSync();
 
-    // Subscribe to Firestore updates in real-time
+    // Subscribe to Firestore updates in real-time with 0ms local cache dispatch
     const unsubscribeSnapshot = subscribeToClinicalRecords((liveRecords) => {
       if (isMounted && liveRecords.length > 0) {
         setRecords(liveRecords);
+        setIsLoading(false);
+        setSelectedRecord((prev) => {
+          if (!prev) return liveRecords[0];
+          const fresh = liveRecords.find(r => r.id === prev.id);
+          return fresh || prev;
+        });
       }
     });
 
@@ -333,9 +352,13 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
             <div className="border-l border-slate-700 pl-3">
               <h2 className="text-sm sm:text-base font-extrabold text-white flex items-center gap-2">
                 <span>Historiales Clínicos & Triage SubaTECH</span>
-                <span className="bg-[#2BF267]/20 text-[#2BF267] text-[10px] font-semibold px-2 py-0.5 rounded-full border border-[#2BF267]/30 flex items-center gap-1">
+                <span className="bg-[#2BF267]/20 text-[#2BF267] text-[10px] font-semibold px-2 py-0.5 rounded-full border border-[#2BF267]/30 flex items-center gap-1 shadow-sm">
                   <span className="w-1.5 h-1.5 rounded-full bg-[#2BF267] animate-pulse"></span>
-                  Firebase Firestore
+                  Firestore Turbo 0ms
+                </span>
+                <span className="hidden sm:inline-flex items-center gap-1 bg-cyan-950/70 text-cyan-300 text-[10px] font-mono px-2 py-0.5 rounded-full border border-cyan-500/30">
+                  <Zap className="w-3 h-3 text-cyan-400" />
+                  IndexedDB Cache + Live Stream
                 </span>
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
