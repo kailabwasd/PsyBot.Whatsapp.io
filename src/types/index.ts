@@ -60,12 +60,14 @@ export interface PsychologistPermissions {
   administrativo: boolean;
 }
 
+export type UserApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
 export interface PsychologistAuthUser {
   uid: string;
   email: string | null;
   displayName: string;
   photoURL: string;
-  provider: 'google.com' | 'github.com' | 'email' | 'demo' | string;
+  provider: 'google.com' | 'email';
   role: string;
   license: string; // Registro Sanitario obligatorio
   specialty: string;
@@ -73,6 +75,11 @@ export interface PsychologistAuthUser {
   phone?: string;
   termsAccepted: boolean;
   profileCompleted: boolean;
+  isApproved?: boolean; // Requiere autorización de un administrador
+  approvalStatus?: UserApprovalStatus;
+  approvedAt?: number;
+  approvedBy?: string;
+  rejectionReason?: string;
   twoFactorSecret?: string;
   twoFactorEnabled?: boolean;
   isAdmin?: boolean;

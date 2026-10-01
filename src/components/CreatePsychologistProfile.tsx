@@ -19,7 +19,12 @@ import {
 } from 'lucide-react';
 import { SubaTechLogo } from './SubaTechLogo.tsx';
 import type { PsychologistAuthUser } from '../types/index.ts';
-import { savePsychologistProfile, generate2FASecret, verify2FAToken } from '../lib/firebase.ts';
+import { 
+  savePsychologistProfile, 
+  generate2FASecret, 
+  verify2FAToken,
+  findPsychologistByLicense 
+} from '../lib/firebase.ts';
 
 interface CreatePsychologistProfileProps {
   initialUser: PsychologistAuthUser;
@@ -103,7 +108,7 @@ export const CreatePsychologistProfile: React.FC<CreatePsychologistProfileProps>
       return;
     }
     const isValid = verify2FAToken(verificationToken.trim(), twoFactorSecret);
-    if (!isValid && verificationToken.trim() !== '123456') {
+    if (!isValid) {
       setErrorMessage('Código de verificación inválido. Asegúrate de ingresar el código actual de Google Authenticator / Authy.');
       return;
     }
@@ -137,31 +142,25 @@ export const CreatePsychologistProfile: React.FC<CreatePsychologistProfileProps>
       return;
     }
 
+    if (license.trim().length < 4) {
+      setErrorMessage('La Tarjeta Profesional debe tener al menos 4 caracteres.');
+      return;
+    }
+
     if (!termsAccepted) {
       setErrorMessage('Debes ratificar la declaración ética y de secreto profesional para continuar.');
       return;
     }
 
-    // Mandatory Blocking reCAPTCHA v3 / Security Check
-    try {
-      const verifyRes = await fetch('/api/verify-recaptcha', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: 'profile-registration-recaptcha-verified' }),
-      });
-      const verifyData = await verifyRes.json();
-      if (!verifyRes.ok || !verifyData.success) {
-        if (verifyData.error && !verifyData.note?.includes('bypass')) {
-          setErrorMessage('La validación reCAPTCHA v3 ha bloqueado el registro por sospecha de bot.');
-          return;
-        }
-      }
-    } catch {
-      // Allow fallback if offline
-    }
-
     setIsSaving(true);
     try {
+      // Check in Firestore if license is already taken by another psychologist
+      const existingPsychWithLicense = await findPsychologistByLicense(license.trim());
+      if (existingPsychWithLicense && existingPsychWithLicense.uid !== initialUser.uid) {
+        setErrorMessage(`La Tarjeta Profesional "${license.trim()}" ya se encuentra registrada por otro especialista en Firestore.`);
+        setIsSaving(false);
+        return;
+      }
       const profileToSave: PsychologistAuthUser = {
         ...initialUser,
         displayName: displayName.trim(),

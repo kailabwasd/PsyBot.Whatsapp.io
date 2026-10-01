@@ -206,7 +206,7 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
       setEditEvolution(selectedRecord.clinicalEvolution || '');
       setEditImpressions((selectedRecord.diagnosticImpressions || []).join(', '));
       setEditSpecialistOpinion(selectedRecord.specialistOpinion || '');
-      setEditAssignedPsychologist(selectedRecord.assignedPsychologist || currentUser?.displayName || 'Lic. Sofia Ramos');
+      setEditAssignedPsychologist(selectedRecord.assignedPsychologist || currentUser?.displayName || 'Psicólogo(a) de Guardia');
     }
   }, [selectedRecord?.id]);
 
@@ -241,7 +241,7 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
           .filter(Boolean),
         specialistOpinion: editSpecialistOpinion.trim(),
         specialistOpinionDate: editSpecialistOpinion.trim() ? Date.now() : selectedRecord.specialistOpinionDate,
-        assignedPsychologist: editAssignedPsychologist.trim() || selectedRecord.assignedPsychologist || currentUser?.displayName || 'Lic. Sofia Ramos',
+        assignedPsychologist: editAssignedPsychologist.trim() || selectedRecord.assignedPsychologist || currentUser?.displayName || 'Psicólogo(a) de Guardia',
         lastUpdated: Date.now(),
       };
 

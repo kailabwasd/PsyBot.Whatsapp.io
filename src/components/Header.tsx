@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { 
   ShieldAlert, 
+  ShieldCheck,
   UserCheck, 
   Activity, 
   LogOut, 
@@ -32,6 +33,8 @@ interface HeaderProps {
   browserPermission?: NotificationPermission;
   onRequestPermission?: () => void;
   onTestNotification?: () => void;
+  pendingApprovalsCount?: number;
+  onOpenAdminPortal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -48,8 +51,11 @@ export const Header: React.FC<HeaderProps> = ({
   browserPermission = 'default',
   onRequestPermission,
   onTestNotification,
+  pendingApprovalsCount = 0,
+  onOpenAdminPortal,
 }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const isAdmin = Boolean(currentUser.isAdmin || currentUser.email === 'kailabwasd@gmail.com');
 
   return (
     <header className="w-full shadow-sm text-xs">
@@ -164,6 +170,28 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               )}
 
+              {/* Botón Portal de Administradores (Only for Admins) */}
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={onOpenAdminPortal || onOpenSettings}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition flex items-center gap-1.5 cursor-pointer border ${
+                    pendingApprovalsCount > 0
+                      ? 'bg-amber-400 hover:bg-amber-300 text-slate-950 border-amber-300 shadow-md shadow-amber-400/25 animate-pulse'
+                      : 'bg-slate-900/90 hover:bg-slate-800 text-amber-300 border-amber-500/40'
+                  }`}
+                  title="Portal de Administradores - Autorizar psicólogos y controlar accesos"
+                >
+                  <ShieldCheck className={`w-3.5 h-3.5 ${pendingApprovalsCount > 0 ? 'text-slate-950' : 'text-amber-400'}`} />
+                  <span className="hidden sm:inline">Portal Admin</span>
+                  {pendingApprovalsCount > 0 ? (
+                    <span className="px-1.5 py-0.2 bg-slate-950 text-amber-300 rounded-full font-mono text-[9px] font-black border border-amber-300">
+                      ⚠️ {pendingApprovalsCount}
+                    </span>
+                  ) : null}
+                </button>
+              )}
+
               {/* Perfil dropdown */}
               <div className="relative">
                 <button
@@ -195,11 +223,33 @@ export const Header: React.FC<HeaderProps> = ({
                         <div className="min-w-0 flex-1">
                           <h4 className="font-bold text-slate-900 text-[11px] truncate">{currentUser.displayName}</h4>
                           <p className="text-[9px] text-slate-500 truncate">{currentUser.email || 'Psicólogo(a) Guardia'}</p>
+                          {isAdmin && (
+                            <span className="inline-block mt-0.5 px-1.5 py-0.2 bg-amber-100 text-amber-800 font-bold rounded text-[9px] border border-amber-200">
+                              👑 Administrador Clínico
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
 
                     <div className="space-y-1 text-[11px]">
+                      {isAdmin && (
+                        <button
+                          onClick={() => { setDropdownOpen(false); onOpenAdminPortal ? onOpenAdminPortal() : onOpenSettings(); }}
+                          className="w-full text-left px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold flex items-center justify-between text-[11px] transition border border-amber-200"
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
+                            <span>Portal Administrador</span>
+                          </div>
+                          {pendingApprovalsCount > 0 && (
+                            <span className="px-1.5 py-0.2 bg-amber-500 text-slate-950 rounded-full font-mono text-[9px] font-black animate-pulse">
+                              {pendingApprovalsCount} por autorizar
+                            </span>
+                          )}
+                        </button>
+                      )}
+
                       <button
                         onClick={() => { setDropdownOpen(false); onEditProfile(); }}
                         className="w-full text-left px-2.5 py-1 rounded hover:bg-slate-100 flex items-center gap-1.5 font-medium text-slate-700 transition"

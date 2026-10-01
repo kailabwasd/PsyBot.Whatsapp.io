@@ -34,6 +34,7 @@ import {
   HeartPulse,
   Search,
   Phone,
+  Mail,
   Users,
   Clock,
   Bug,
@@ -45,8 +46,13 @@ import {
   Activity,
   Radio
 } from 'lucide-react';
-import type { PsychologistAuthUser, PsychologistPermissions, PatientSession, SystemErrorLog } from '../types/index.ts';
-import { savePsychologistProfile } from '../lib/firebase.ts';
+import type { PsychologistAuthUser, PsychologistPermissions, UserApprovalStatus, PatientSession, SystemErrorLog } from '../types/index.ts';
+import { 
+  savePsychologistProfile, 
+  approvePsychologist, 
+  rejectOrSuspendPsychologist, 
+  deletePsychologistFromFirestore 
+} from '../lib/firebase.ts';
 import { AuditLog, logAuditEvent } from './AuditLog.tsx';
 import { 
   fetchSystemErrorLogs, 
@@ -71,13 +77,16 @@ interface SettingsModalProps {
     uid: string, 
     isAdmin: boolean, 
     role?: string, 
-    permissions?: PsychologistPermissions
+    permissions?: PsychologistPermissions,
+    approvalStatus?: UserApprovalStatus,
+    isApproved?: boolean
   ) => void;
   themeMode: 'light' | 'dark' | 'subatech';
   onThemeChange: (theme: 'light' | 'dark' | 'subatech') => void;
   sessions?: PatientSession[];
   onDeleteSession?: (sessionId: string) => Promise<void>;
   onClearAllSessions?: () => Promise<void>;
+  initialTab?: 'profile' | 'twofactor' | 'admins' | 'patients' | 'errorlogs' | 'theme' | 'audit' | 'crisiskeywords';
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -91,8 +100,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   sessions = [],
   onDeleteSession,
   onClearAllSessions,
+  initialTab = 'profile',
 }) => {
-  const [activeTab, setActiveTab] = useState<'profile' | 'twofactor' | 'admins' | 'patients' | 'errorlogs' | 'theme' | 'audit' | 'crisiskeywords'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'twofactor' | 'admins' | 'patients' | 'errorlogs' | 'theme' | 'audit' | 'crisiskeywords'>(initialTab);
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
   
   // Profile editing local state
   const [displayName, setDisplayName] = useState(currentUser.displayName || '');
@@ -499,6 +515,84 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       ...prev,
       [uid]: { ...current, ...patch }
     }));
+  };
+
+  const [psychApprovalFilter, setPsychApprovalFilter] = useState<'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'>('ALL');
+  const [actionLoadingUid, setActionLoadingUid] = useState<string | null>(null);
+
+  const handleApproveAccess = async (psych: PsychologistAuthUser) => {
+    setActionLoadingUid(psych.uid);
+    try {
+      const draft = getPsychDraft(psych);
+      const finalRole = draft.isCustomRole ? (draft.customRole.trim() || 'Psicólogo Clínico') : draft.role;
+      await approvePsychologist(
+        psych.uid, 
+        currentUser.email || 'kailabwasd@gmail.com',
+        draft.permissions,
+        finalRole
+      );
+      await onUpdatePsychologistRole(psych.uid, draft.isAdmin, finalRole, draft.permissions, 'APPROVED', true);
+      await logAuditEvent({
+        adminEmail: currentUser.email || 'kailabwasd@gmail.com',
+        adminName: currentUser.displayName || 'Super Administrador',
+        action: 'ROLE_UPDATE',
+        severity: 'CRITICAL',
+        category: 'ROLES',
+        details: `Autorización de acceso al portal médico concedida a ${psych.displayName} (${psych.email || 'sin correo'}). Tarjeta Profesional: ${psych.license || 'N/A'}.`,
+      });
+      updatePsychDraft(psych.uid, { savedNotice: true });
+      setTimeout(() => updatePsychDraft(psych.uid, { savedNotice: false }), 3000);
+    } catch (err: any) {
+      console.error('Error al autorizar psicólogo:', err);
+    } finally {
+      setActionLoadingUid(null);
+    }
+  };
+
+  const handleRejectOrSuspend = async (psych: PsychologistAuthUser) => {
+    setActionLoadingUid(psych.uid);
+    try {
+      await rejectOrSuspendPsychologist(
+        psych.uid, 
+        currentUser.email || 'kailabwasd@gmail.com',
+        'Acceso revocado o suspendido por el Administrador Clínico'
+      );
+      await onUpdatePsychologistRole(psych.uid, false, psych.role, { lectura: false, escritura: false, administrativo: false }, 'REJECTED', false);
+      await logAuditEvent({
+        adminEmail: currentUser.email || 'kailabwasd@gmail.com',
+        adminName: currentUser.displayName || 'Super Administrador',
+        action: 'ROLE_UPDATE',
+        severity: 'CRITICAL',
+        category: 'ROLES',
+        details: `Acceso revocado/suspendido para ${psych.displayName} (${psych.email || 'sin correo'}).`,
+      });
+      updatePsychDraft(psych.uid, { savedNotice: true });
+      setTimeout(() => updatePsychDraft(psych.uid, { savedNotice: false }), 3000);
+    } catch (err: any) {
+      console.error('Error al suspender psicólogo:', err);
+    } finally {
+      setActionLoadingUid(null);
+    }
+  };
+
+  const handleDeletePsychologist = async (uid: string, name: string) => {
+    if (!window.confirm(`¿Estás seguro de eliminar el registro de ${name} de Firestore?`)) return;
+    setActionLoadingUid(uid);
+    try {
+      await deletePsychologistFromFirestore(uid);
+      await logAuditEvent({
+        adminEmail: currentUser.email || 'kailabwasd@gmail.com',
+        adminName: currentUser.displayName || 'Super Administrador',
+        action: 'ROLE_UPDATE',
+        severity: 'CRITICAL',
+        category: 'ROLES',
+        details: `Expediente eliminado de Firestore para el especialista ${name} (${uid}).`,
+      });
+    } catch (err) {
+      console.error('Error deleting psychologist:', err);
+    } finally {
+      setActionLoadingUid(null);
+    }
   };
 
   const handleSavePsychologistPermissions = async (psych: PsychologistAuthUser) => {
@@ -1074,69 +1168,147 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           )}
 
-          {/* TAB 3: ROLES Y PERMISOS (Only for Owner/Admin) */}
+          {/* TAB 3: PORTAL DE ADMINISTRACIÓN Y AUTORIZACIÓN DE USUARIOS (Only for Owner/Admin) */}
           {activeTab === 'admins' && isOwner && (
             <div className="space-y-5">
               
               {/* Header banner */}
               <div className="p-4 rounded-2xl bg-gradient-to-r from-cyan-950/40 via-slate-900 to-amber-950/40 border border-cyan-500/30 text-xs flex items-start gap-3.5">
-                <div className="w-9 h-9 rounded-xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400 shrink-0 mt-0.5">
+                <div className="w-10 h-10 rounded-xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400 shrink-0 mt-0.5">
                   <ShieldCheck className="w-5 h-5" />
                 </div>
-                <div className="space-y-1">
-                  <p className="font-bold text-white text-sm">
-                    Gestión de Roles y Permisos Específicos
-                  </p>
+                <div className="space-y-1 flex-1">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <p className="font-bold text-white text-sm flex items-center gap-2">
+                      <span>Portal de Autorizaciones y Control de Especialistas</span>
+                      <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 text-[10px] font-mono border border-cyan-500/30">
+                        Firestore: /psychologists
+                      </span>
+                    </p>
+                    {allPsychologists.filter(p => !p.isAdmin && (p.approvalStatus === 'PENDING' || p.isApproved === false)).length > 0 && (
+                      <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-bold animate-pulse">
+                        ⚠️ {allPsychologists.filter(p => !p.isAdmin && (p.approvalStatus === 'PENDING' || p.isApproved === false)).length} solicitudes pendientes
+                      </span>
+                    )}
+                  </div>
                   <p className="text-slate-300 text-xs leading-relaxed">
-                    Como Administrador, puedes asignar el rol clínico actual y configurar los 3 niveles de permisos específicos (<strong className="text-blue-300">Lectura</strong>, <strong className="text-emerald-300">Escritura</strong> y <strong className="text-amber-300">Administrativo</strong>) para cada psicólogo registrado.
+                    Como Administrador Clínico, eres el responsable de <strong className="text-amber-300">autorizar el acceso a la web</strong> a los psicólogos que se registran. Revisa su Tarjeta Profesional (ReTHUS) y asigna sus permisos clínicos de atención.
                   </p>
                 </div>
               </div>
 
-              {/* Guía rápida de permisos */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[11px]">
-                <div className="p-2.5 rounded-xl bg-slate-950 border border-blue-500/20 flex items-center gap-2 text-slate-300">
-                  <BookOpen className="w-4 h-4 text-blue-400 shrink-0" />
-                  <span><strong>Lectura:</strong> Consulta de expedientes, notas y triage.</span>
-                </div>
-                <div className="p-2.5 rounded-xl bg-slate-950 border border-emerald-500/20 flex items-center gap-2 text-slate-300">
-                  <FileEdit className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span><strong>Escritura:</strong> Atención por chat y redacción de evolución.</span>
-                </div>
-                <div className="p-2.5 rounded-xl bg-slate-950 border border-amber-500/20 flex items-center gap-2 text-slate-300">
-                  <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span><strong>Administrativo:</strong> Configuración, auditoría y roles.</span>
+              {/* Filtros de Autorización */}
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => setPsychApprovalFilter('ALL')}
+                    className={`px-3 py-1.5 rounded-xl transition cursor-pointer flex items-center gap-1.5 ${
+                      psychApprovalFilter === 'ALL'
+                        ? 'bg-[#00E5FF] text-slate-950 shadow font-bold'
+                        : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                    }`}
+                  >
+                    <span>Todos ({allPsychologists.length})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPsychApprovalFilter('PENDING')}
+                    className={`px-3 py-1.5 rounded-xl transition cursor-pointer flex items-center gap-1.5 ${
+                      psychApprovalFilter === 'PENDING'
+                        ? 'bg-amber-400 text-slate-950 shadow font-bold'
+                        : 'bg-slate-950 text-amber-300 hover:text-amber-200 border border-amber-500/30'
+                    }`}
+                  >
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>Pendientes ({allPsychologists.filter(p => !p.isAdmin && (p.approvalStatus === 'PENDING' || p.isApproved === false)).length})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPsychApprovalFilter('APPROVED')}
+                    className={`px-3 py-1.5 rounded-xl transition cursor-pointer flex items-center gap-1.5 ${
+                      psychApprovalFilter === 'APPROVED'
+                        ? 'bg-emerald-400 text-slate-950 shadow font-bold'
+                        : 'bg-slate-950 text-emerald-300 hover:text-emerald-200 border border-emerald-500/30'
+                    }`}
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Autorizados ({allPsychologists.filter(p => p.isAdmin || p.approvalStatus === 'APPROVED' || p.isApproved === true).length})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPsychApprovalFilter('REJECTED')}
+                    className={`px-3 py-1.5 rounded-xl transition cursor-pointer flex items-center gap-1.5 ${
+                      psychApprovalFilter === 'REJECTED'
+                        ? 'bg-red-500 text-white shadow font-bold'
+                        : 'bg-slate-950 text-red-300 hover:text-red-200 border border-red-500/30'
+                    }`}
+                  >
+                    <UserX className="w-3.5 h-3.5" />
+                    <span>Suspendidos ({allPsychologists.filter(p => p.approvalStatus === 'REJECTED').length})</span>
+                  </button>
                 </div>
               </div>
 
-              {/* Lista de Psicólogos con asignación */}
+              {/* Lista de Psicólogos con asignación e información completa */}
               <div className="space-y-4">
-                {allPsychologists.length === 0 ? (
-                  <div className="p-8 text-center bg-slate-950 rounded-2xl border border-slate-800">
-                    <User className="w-10 h-10 text-slate-600 mx-auto mb-2" />
-                    <p className="text-xs text-slate-400">No hay otros psicólogos registrados actualmente en Firestore.</p>
+                {allPsychologists.filter(p => {
+                  if (psychApprovalFilter === 'PENDING') return !p.isAdmin && (p.approvalStatus === 'PENDING' || p.isApproved === false);
+                  if (psychApprovalFilter === 'APPROVED') return p.isAdmin || p.approvalStatus === 'APPROVED' || p.isApproved === true;
+                  if (psychApprovalFilter === 'REJECTED') return p.approvalStatus === 'REJECTED';
+                  return true;
+                }).length === 0 ? (
+                  <div className="p-8 text-center bg-slate-950 rounded-2xl border border-slate-800 space-y-2">
+                    <User className="w-10 h-10 text-slate-600 mx-auto" />
+                    <p className="text-xs text-slate-300 font-bold">No hay especialistas en este filtro.</p>
+                    <p className="text-[11px] text-slate-500">Selecciona "Todos" para ver el cuerpo profesional completo.</p>
                   </div>
                 ) : (
-                  allPsychologists.map((psych) => {
+                  allPsychologists.filter(p => {
+                    if (psychApprovalFilter === 'PENDING') return !p.isAdmin && (p.approvalStatus === 'PENDING' || p.isApproved === false);
+                    if (psychApprovalFilter === 'APPROVED') return p.isAdmin || p.approvalStatus === 'APPROVED' || p.isApproved === true;
+                    if (psychApprovalFilter === 'REJECTED') return p.approvalStatus === 'REJECTED';
+                    return true;
+                  }).map((psych) => {
                     const draft = getPsychDraft(psych);
                     const isProtectedOwner = psych.email === 'kailabwasd@gmail.com';
+                    const isApprovedUser = isProtectedOwner || psych.approvalStatus === 'APPROVED' || psych.isApproved === true;
+                    const isPendingUser = !isProtectedOwner && (psych.approvalStatus === 'PENDING' || psych.isApproved === false);
+                    const isRejectedUser = !isProtectedOwner && psych.approvalStatus === 'REJECTED';
 
                     return (
                       <div 
                         key={psych.uid} 
-                        className="p-4 rounded-2xl bg-slate-950 border border-slate-800 hover:border-slate-750 transition space-y-4"
+                        className={`p-5 rounded-2xl bg-slate-950 border transition space-y-4 ${
+                          isPendingUser 
+                            ? 'border-amber-500/50 bg-amber-950/10 ring-1 ring-amber-500/30' 
+                            : isRejectedUser 
+                            ? 'border-red-500/40 bg-red-950/10' 
+                            : 'border-slate-800 hover:border-slate-750'
+                        }`}
                       >
-                        {/* Cabecera del usuario */}
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-850">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <img 
-                              src={psych.photoURL} 
-                              alt={psych.displayName} 
-                              className="w-11 h-11 rounded-xl object-cover ring-1 ring-slate-700" 
-                            />
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2">
-                                <p className="text-xs font-bold text-white truncate">{psych.displayName}</p>
+                        {/* Cabecera del usuario: Foto, Nombre, Estado de Autorización */}
+                        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 pb-3 border-b border-slate-850">
+                          <div className="flex items-start gap-3 min-w-0">
+                            <div className="relative shrink-0">
+                              <img 
+                                src={psych.photoURL} 
+                                alt={psych.displayName} 
+                                className="w-12 h-12 rounded-xl object-cover ring-1 ring-slate-700" 
+                              />
+                              <span 
+                                className={`w-3.5 h-3.5 rounded-full absolute -bottom-1 -right-1 ring-2 ring-slate-950 ${
+                                  isApprovedUser ? 'bg-emerald-400' : isRejectedUser ? 'bg-red-500' : 'bg-amber-400 animate-ping'
+                                }`} 
+                              />
+                            </div>
+
+                            <div className="min-w-0 space-y-0.5">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="text-sm font-bold text-white truncate">{psych.displayName}</p>
                                 {isProtectedOwner ? (
                                   <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
                                     👑 Owner Principal
@@ -1147,56 +1319,96 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                   </span>
                                 ) : (
                                   <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-slate-800 text-slate-400">
-                                    👨‍⚕️ Clínico
+                                    👨‍⚕️ Especialista
                                   </span>
                                 )}
                               </div>
-                              <p className="text-[11px] text-slate-400 truncate">{psych.email || 'Sin correo registrado'}</p>
-                              <div className="flex items-center gap-2 mt-0.5">
-                                <span className="text-[10px] font-mono text-cyan-400">
-                                  {psych.license || 'Sin registro sanitario'}
-                                </span>
-                                {psych.uniqueUserId && (
-                                  <span className="text-[10px] font-mono text-slate-500">
-                                    · ID: {psych.uniqueUserId}
-                                  </span>
-                                )}
+                              <p className="text-xs text-slate-300 font-mono flex items-center gap-1.5">
+                                <Mail className="w-3 h-3 text-slate-400 shrink-0" />
+                                <span>{psych.email || 'Sin correo registrado'}</span>
+                              </p>
+                              <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono">
+                                <span>UID: {psych.uid}</span>
+                                <span>·</span>
+                                <span className="text-cyan-300 uppercase">Vía {psych.provider || 'Google'}</span>
                               </div>
                             </div>
                           </div>
 
-                          {/* Resumen de permisos activos */}
-                          <div className="flex flex-wrap items-center gap-1.5 self-start sm:self-center">
-                            <span className={`text-[10px] px-2 py-0.5 rounded-md font-semibold flex items-center gap-1 ${
-                              draft.permissions.lectura 
-                                ? 'bg-blue-500/15 text-blue-300 border border-blue-500/30' 
-                                : 'bg-slate-900 text-slate-600 line-through'
-                            }`}>
-                              <BookOpen className="w-2.5 h-2.5" /> Lectura
+                          {/* Badge de Estado de Aprobación */}
+                          <div className="shrink-0 self-start sm:self-center">
+                            {isApprovedUser ? (
+                              <div className="px-3 py-1 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex items-center gap-1.5 shadow-sm">
+                                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                                <span>Acceso Autorizado</span>
+                              </div>
+                            ) : isRejectedUser ? (
+                              <div className="px-3 py-1 rounded-xl bg-red-500/15 border border-red-500/40 text-red-300 text-xs font-bold flex items-center gap-1.5">
+                                <UserX className="w-4 h-4 text-red-400" />
+                                <span>Acceso Suspendido / Denegado</span>
+                              </div>
+                            ) : (
+                              <div className="px-3 py-1.5 rounded-xl bg-amber-500/20 border border-amber-500/50 text-amber-300 text-xs font-bold flex items-center gap-1.5 animate-pulse shadow-lg shadow-amber-500/10">
+                                <Clock className="w-4 h-4 text-amber-400 animate-spin" />
+                                <span>Pendiente de Autorización</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Ficha Completa del Usuario: Información Profesional Detallada */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-[11px]">
+                          <div>
+                            <span className="text-slate-500 block uppercase text-[9px] font-bold">Tarjeta Profesional / ReTHUS:</span>
+                            <span className="font-mono font-bold text-cyan-300 flex items-center gap-1 mt-0.5">
+                              <Award className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                              <span>{psych.license || 'No registrada'}</span>
                             </span>
-                            <span className={`text-[10px] px-2 py-0.5 rounded-md font-semibold flex items-center gap-1 ${
-                              draft.permissions.escritura 
-                                ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' 
-                                : 'bg-slate-900 text-slate-600 line-through'
-                            }`}>
-                              <FileEdit className="w-2.5 h-2.5" /> Escritura
+                          </div>
+
+                          <div>
+                            <span className="text-slate-500 block uppercase text-[9px] font-bold">Teléfono / WhatsApp:</span>
+                            <span className="text-slate-200 flex items-center gap-1 mt-0.5 font-mono">
+                              <Phone className="w-3 h-3 text-slate-400 shrink-0" />
+                              <span>{psych.phone || 'No registrado'}</span>
                             </span>
-                            <span className={`text-[10px] px-2 py-0.5 rounded-md font-semibold flex items-center gap-1 ${
-                              draft.permissions.administrativo 
-                                ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30' 
-                                : 'bg-slate-900 text-slate-600 line-through'
-                            }`}>
-                              <ShieldAlert className="w-2.5 h-2.5" /> Admin
+                          </div>
+
+                          <div>
+                            <span className="text-slate-500 block uppercase text-[9px] font-bold">Especialidad Clínica:</span>
+                            <span className="text-slate-200 truncate block mt-0.5">
+                              {psych.specialty || 'Atención Psicológica'}
+                            </span>
+                          </div>
+
+                          <div>
+                            <span className="text-slate-500 block uppercase text-[9px] font-bold">Institución / Sede:</span>
+                            <span className="text-slate-300 truncate block mt-0.5">
+                              {psych.institution || 'Subred Integrada Norte - Suba'}
+                            </span>
+                          </div>
+
+                          <div>
+                            <span className="text-slate-500 block uppercase text-[9px] font-bold">Fecha de Registro:</span>
+                            <span className="text-slate-400 font-mono mt-0.5 block">
+                              {psych.createdAt ? new Date(psych.createdAt).toLocaleString('es-CO') : 'Reciente'}
+                            </span>
+                          </div>
+
+                          <div>
+                            <span className="text-slate-500 block uppercase text-[9px] font-bold">Último Acceso:</span>
+                            <span className="text-slate-400 font-mono mt-0.5 block">
+                              {psych.lastLoginAt ? new Date(psych.lastLoginAt).toLocaleString('es-CO') : 'Sin registro'}
                             </span>
                           </div>
                         </div>
 
-                        {/* Selección de Rol Actual */}
+                        {/* Asignación de Rol Clínico */}
                         <div className="space-y-1.5">
                           <label className="text-[11px] font-bold text-slate-300 flex items-center justify-between">
-                            <span>Seleccionar Rol Clínico:</span>
+                            <span>Rol Clínico Asignado:</span>
                             <span className="text-[10px] text-cyan-400 font-mono">
-                              Rol asignado: {draft.isCustomRole ? draft.customRole || 'Personalizado' : draft.role}
+                              {draft.isCustomRole ? draft.customRole || 'Personalizado' : draft.role}
                             </span>
                           </label>
 
@@ -1245,7 +1457,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         {/* Asignación de Permisos Específicos */}
                         <div className="space-y-1.5">
                           <label className="text-[11px] font-bold text-slate-300 block">
-                            Asignar Permisos Específicos:
+                            Permisos Clínicos:
                           </label>
 
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -1359,55 +1571,97 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         {draft.savedNotice && (
                           <div className="p-2.5 bg-emerald-950/70 border border-emerald-500/40 rounded-xl text-emerald-200 text-xs flex items-center gap-2 animate-in fade-in">
                             <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                            <span>¡Rol y permisos actualizados exitosamente en Firestore!</span>
+                            <span>¡Actualización confirmada exitosamente en Firestore!</span>
                           </div>
                         )}
 
-                        {/* Botones de acción */}
+                        {/* Barra de Acciones del Administrador */}
                         {!isProtectedOwner && (
-                          <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-850">
-                            {/* Toggle rápido de admin */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const newAdmin = !draft.isAdmin;
-                                updatePsychDraft(psych.uid, {
-                                  isAdmin: newAdmin,
-                                  permissions: {
-                                    ...draft.permissions,
-                                    administrativo: newAdmin
-                                  }
-                                });
-                              }}
-                              className={`px-3 py-1.5 text-xs font-semibold rounded-xl border transition cursor-pointer flex items-center gap-1.5 ${
-                                draft.isAdmin
-                                  ? 'bg-amber-950/40 border-amber-500/40 text-amber-300 hover:bg-amber-900/50'
-                                  : 'bg-slate-900 border-slate-750 text-slate-300 hover:bg-slate-800'
-                              }`}
-                            >
-                              <ShieldCheck className="w-3.5 h-3.5" />
-                              <span>{draft.isAdmin ? 'Quitar Rol Administrador' : 'Asignar como Administrador'}</span>
-                            </button>
-
-                            {/* Guardar cambios para este psicólogo */}
-                            <button
-                              type="button"
-                              disabled={draft.isSaving}
-                              onClick={() => handleSavePsychologistPermissions(psych)}
-                              className="px-4 py-1.5 bg-[#00E5FF] hover:bg-[#00D2F4] text-slate-950 font-bold text-xs rounded-xl shadow transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
-                            >
-                              {draft.isSaving ? (
-                                <>
-                                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                                  <span>Guardando en Firestore...</span>
-                                </>
+                          <div className="pt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-850">
+                            <div className="flex flex-wrap items-center gap-2">
+                              {/* ACCIÓN PRINCIPAL: AUTORIZAR ACCESO O SUSPENDER */}
+                              {!isApprovedUser ? (
+                                <button
+                                  type="button"
+                                  disabled={actionLoadingUid === psych.uid}
+                                  onClick={() => handleApproveAccess(psych)}
+                                  className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 transition cursor-pointer disabled:opacity-50"
+                                >
+                                  {actionLoadingUid === psych.uid ? (
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <CheckCircle2 className="w-4 h-4" />
+                                  )}
+                                  <span>Autorizar Acceso al Portal</span>
+                                </button>
                               ) : (
-                                <>
-                                  <Save className="w-3.5 h-3.5" />
-                                  <span>Guardar Rol y Permisos</span>
-                                </>
+                                <button
+                                  type="button"
+                                  disabled={actionLoadingUid === psych.uid}
+                                  onClick={() => handleRejectOrSuspend(psych)}
+                                  className="px-3.5 py-2 rounded-xl bg-red-950/50 hover:bg-red-900/60 text-red-300 border border-red-500/40 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                                >
+                                  <UserX className="w-3.5 h-3.5" />
+                                  <span>Suspender Acceso</span>
+                                </button>
                               )}
-                            </button>
+
+                              {/* Toggle rápido de admin */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const newAdmin = !draft.isAdmin;
+                                  updatePsychDraft(psych.uid, {
+                                    isAdmin: newAdmin,
+                                    permissions: {
+                                      ...draft.permissions,
+                                      administrativo: newAdmin
+                                    }
+                                  });
+                                }}
+                                className={`px-3 py-2 text-xs font-semibold rounded-xl border transition cursor-pointer flex items-center gap-1.5 ${
+                                  draft.isAdmin
+                                    ? 'bg-amber-950/40 border-amber-500/40 text-amber-300 hover:bg-amber-900/50'
+                                    : 'bg-slate-900 border-slate-750 text-slate-300 hover:bg-slate-800'
+                                }`}
+                              >
+                                <ShieldCheck className="w-3.5 h-3.5" />
+                                <span>{draft.isAdmin ? 'Quitar Admin' : 'Hacer Admin'}</span>
+                              </button>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              {/* Guardar cambios para este psicólogo */}
+                              <button
+                                type="button"
+                                disabled={draft.isSaving}
+                                onClick={() => handleSavePsychologistPermissions(psych)}
+                                className="px-4 py-2 bg-[#00E5FF] hover:bg-[#00D2F4] text-slate-950 font-bold text-xs rounded-xl shadow transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                              >
+                                {draft.isSaving ? (
+                                  <>
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                    <span>Guardando...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Save className="w-3.5 h-3.5" />
+                                    <span>Guardar Rol</span>
+                                  </>
+                                )}
+                              </button>
+
+                              {/* Eliminar psicólogo */}
+                              <button
+                                type="button"
+                                disabled={actionLoadingUid === psych.uid}
+                                onClick={() => handleDeletePsychologist(psych.uid, psych.displayName)}
+                                className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-950/40 rounded-xl transition cursor-pointer"
+                                title="Eliminar registro de Firestore"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>

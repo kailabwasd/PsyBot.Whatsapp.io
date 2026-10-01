@@ -5,7 +5,6 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   GoogleAuthProvider, 
-  GithubAuthProvider,
   onAuthStateChanged, 
   signOut,
   type User 
@@ -19,12 +18,16 @@ import {
   setDoc, 
   getDoc, 
   getDocFromServer,
+  deleteDoc,
   collection,
   getDocs,
+  query,
+  where,
+  onSnapshot,
   type DocumentData
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import type { PsychologistAuthUser } from '../types/index.ts';
+import type { PsychologistAuthUser, PsychologistPermissions } from '../types/index.ts';
 import { encryptSecret, decryptSecret } from './cryptoUtils.ts';
 import { generateSecret, generateURI, verifySync } from 'otplib';
 import qrcode from 'qrcode';
@@ -75,10 +78,9 @@ export function verify2FAToken(token: string, secret: string): boolean {
   }
 }
 
-
+// Authorized Administrator Real Accounts (kailabwasd@gmail.com)
 export const ADMIN_EMAILS = [
-  'kailabwasd@gmail.com',
-  'leandro.menendez1192@gmail.com'
+  'kailabwasd@gmail.com'
 ];
 
 export function isUserAdmin(email?: string | null): boolean {
@@ -87,11 +89,10 @@ export function isUserAdmin(email?: string | null): boolean {
 }
 
 export function createAdminProfile(email = 'kailabwasd@gmail.com', name?: string, photo?: string): PsychologistAuthUser {
-  const isKailab = email.toLowerCase().includes('kailab');
   return {
-    uid: isKailab ? 'admin-kailabwasd' : 'admin-leandro',
+    uid: 'admin-kailabwasd',
     email: email,
-    displayName: name || (isKailab ? 'Administrador Clínico (kailabwasd)' : 'Leandro Menéndez (Administrador Psybot)'),
+    displayName: name || 'Administrador Clínico (kailabwasd)',
     photoURL: photo || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
     provider: 'google.com',
     role: 'Super Administrador & Director Clínico',
@@ -101,13 +102,17 @@ export function createAdminProfile(email = 'kailabwasd@gmail.com', name?: string
     phone: '+57 300 987 6543',
     termsAccepted: true,
     profileCompleted: true,
+    isApproved: true,
+    approvalStatus: 'APPROVED',
+    approvedAt: 1704067200000,
+    approvedBy: 'SYSTEM_SUPERADMIN',
     isAdmin: true,
     permissions: {
       lectura: true,
       escritura: true,
       administrativo: true,
     },
-    createdAt: Date.now(),
+    createdAt: 1704067200000,
     lastLoginAt: Date.now(),
   };
 }
@@ -130,13 +135,65 @@ googleProvider.setCustomParameters({
   prompt: 'select_account'
 });
 
-// GitHub Auth Provider
-export const githubProvider = new GithubAuthProvider();
-githubProvider.addScope('read:user');
-githubProvider.addScope('user:email');
-
 let cachedAccessToken: string | null = null;
 let isSigningIn = false;
+
+/**
+ * Find psychologist in Firestore by email address
+ */
+export async function findPsychologistByEmail(rawEmail: string): Promise<PsychologistAuthUser | null> {
+  const cleanEmail = (rawEmail || '').trim().toLowerCase();
+  if (!cleanEmail) return null;
+
+  try {
+    const colRef = collection(db, 'psychologists');
+    const q = query(colRef, where('email', '==', cleanEmail));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const data = snap.docs[0].data() as PsychologistAuthUser;
+      if (data.twoFactorSecret) {
+        data.twoFactorSecret = await decryptSecret(data.twoFactorSecret);
+      }
+      return data;
+    }
+
+    // Check by deterministic UID fallback
+    const uidFallback = `google-${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    const docSnap = await getDoc(doc(db, 'psychologists', uidFallback));
+    if (docSnap.exists()) {
+      const data = docSnap.data() as PsychologistAuthUser;
+      if (data.twoFactorSecret) {
+        data.twoFactorSecret = await decryptSecret(data.twoFactorSecret);
+      }
+      return data;
+    }
+  } catch (err) {
+    console.warn('Error querying psychologist by email in Firestore:', err);
+  }
+  return null;
+}
+
+/**
+ * Find psychologist in Firestore by professional license (Tarjeta Profesional / ReTHUS)
+ */
+export async function findPsychologistByLicense(rawLicense: string): Promise<PsychologistAuthUser | null> {
+  const cleanLicense = (rawLicense || '').trim().toLowerCase();
+  if (!cleanLicense) return null;
+
+  try {
+    const colRef = collection(db, 'psychologists');
+    const snap = await getDocs(colRef);
+    for (const docSnap of snap.docs) {
+      const data = docSnap.data() as PsychologistAuthUser;
+      if (data.license && data.license.trim().toLowerCase() === cleanLicense) {
+        return data;
+      }
+    }
+  } catch (err) {
+    console.warn('Error querying psychologist by license in Firestore:', err);
+  }
+  return null;
+}
 
 /**
  * Fetch psychologist profile from Firestore with strict timeout to prevent hangs
@@ -145,7 +202,7 @@ export async function getPsychologistFromFirestore(uid: string): Promise<Psychol
   try {
     const docRef = doc(db, 'psychologists', uid);
     const snapPromise = getDoc(docRef);
-    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1000));
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500));
     const snap = await Promise.race([snapPromise, timeoutPromise]);
     if (snap && 'exists' in snap && (snap as any).exists()) {
       const data = (snap as any).data() as PsychologistAuthUser;
@@ -164,14 +221,20 @@ export async function getPsychologistFromFirestore(uid: string): Promise<Psychol
  * Save / Update psychologist profile in Firestore and localStorage (with encrypted 2FA secret)
  */
 export async function savePsychologistProfile(profile: PsychologistAuthUser): Promise<PsychologistAuthUser> {
+  const isSuperAdmin = isUserAdmin(profile.email);
+  const isApproved = isSuperAdmin ? true : (profile.isApproved !== undefined ? profile.isApproved : false);
+  const approvalStatus = isSuperAdmin ? 'APPROVED' : (profile.approvalStatus || (isApproved ? 'APPROVED' : 'PENDING'));
+
   const updatedProfile: PsychologistAuthUser = {
     ...profile,
+    isApproved,
+    approvalStatus,
     permissions: profile.permissions || {
-      lectura: true,
-      escritura: true,
-      administrativo: Boolean(profile.isAdmin),
+      lectura: isSuperAdmin || Boolean(isApproved),
+      escritura: isSuperAdmin || Boolean(isApproved),
+      administrativo: Boolean(profile.isAdmin || isSuperAdmin),
     },
-    profileCompleted: true,
+    profileCompleted: Boolean(profile.license?.trim()),
     lastLoginAt: Date.now(),
   };
 
@@ -184,9 +247,7 @@ export async function savePsychologistProfile(profile: PsychologistAuthUser): Pr
     }
 
     const userDocRef = doc(db, 'psychologists', profile.uid);
-    setDoc(userDocRef, firestorePayload, { merge: true }).catch((err) => {
-      reportFirestoreCriticalError(err, 'Sincronizar Perfil de Psicólogo en Firestore', `UID: ${profile.uid}`).catch(() => {});
-    });
+    await setDoc(userDocRef, firestorePayload, { merge: true });
   } catch (error: any) {
     console.warn('Could not sync psychologist profile to Firestore:', error);
     reportFirestoreCriticalError(error, 'Error al procesar Perfil de Psicólogo para Firestore', `UID: ${profile.uid}`).catch(() => {});
@@ -198,48 +259,72 @@ export async function savePsychologistProfile(profile: PsychologistAuthUser): Pr
 }
 
 /**
- * Sign in directly with a Google account email (useful when Firebase OAuth domain is not yet whitelisted)
+ * Approve a psychologist access from the Administrator Portal
  */
-export async function signInWithGoogleDirect(googleEmail: string, displayName?: string): Promise<{ user: PsychologistAuthUser; isNewOrIncomplete: boolean }> {
-  const cleanEmail = (googleEmail || 'kailabwasd@gmail.com').trim().toLowerCase();
-  
-  if (isUserAdmin(cleanEmail)) {
-    const adminProfile = createAdminProfile(
-      cleanEmail,
-      displayName || 'Administrador Clínico (kailabwasd)',
-      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80'
-    );
-    await savePsychologistProfile(adminProfile);
-    return { user: adminProfile, isNewOrIncomplete: false };
+export async function approvePsychologist(
+  uid: string, 
+  adminEmail: string, 
+  permissions?: PsychologistPermissions, 
+  role?: string
+): Promise<PsychologistAuthUser> {
+  const docRef = doc(db, 'psychologists', uid);
+  const snap = await getDoc(docRef);
+  if (!snap.exists()) {
+    throw new Error(`No se encontró el psicólogo con ID ${uid} en Firestore.`);
   }
-
-  const uid = `google-${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
-  const existing = await getPsychologistFromFirestore(uid);
-
-  if (existing && existing.profileCompleted && existing.license?.trim()) {
-    localStorage.setItem('psybot_psychologist_session', JSON.stringify(existing));
-    return { user: existing, isNewOrIncomplete: false };
-  }
-
-  const draftUser: PsychologistAuthUser = {
-    uid,
-    email: cleanEmail,
-    displayName: displayName || cleanEmail.split('@')[0],
-    photoURL: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(displayName || cleanEmail)}`,
-    provider: 'google.com',
-    role: existing?.role || 'Psicólogo(a) Clínico Titulado(a)',
-    license: existing?.license || '',
-    specialty: existing?.specialty || 'Atención Psicológica y Triage de Crisis',
-    institution: existing?.institution || 'Subred Integrada de Servicios de Salud Norte - Suba',
-    phone: existing?.phone || '',
-    termsAccepted: true,
-    profileCompleted: false,
-    createdAt: existing?.createdAt || Date.now(),
-    lastLoginAt: Date.now(),
+  const current = snap.data() as PsychologistAuthUser;
+  const updated: PsychologistAuthUser = {
+    ...current,
+    isApproved: true,
+    approvalStatus: 'APPROVED',
+    approvedAt: Date.now(),
+    approvedBy: adminEmail,
+    role: role || current.role || 'Psicólogo(a) Clínico Titulado(a)',
+    permissions: permissions || {
+      lectura: true,
+      escritura: true,
+      administrativo: Boolean(current.isAdmin),
+    },
   };
+  await savePsychologistProfile(updated);
+  return updated;
+}
 
-  localStorage.setItem('psybot_psychologist_session', JSON.stringify(draftUser));
-  return { user: draftUser, isNewOrIncomplete: true };
+/**
+ * Reject or suspend a psychologist access from the Administrator Portal
+ */
+export async function rejectOrSuspendPsychologist(
+  uid: string, 
+  adminEmail: string, 
+  reason?: string
+): Promise<PsychologistAuthUser> {
+  const docRef = doc(db, 'psychologists', uid);
+  const snap = await getDoc(docRef);
+  if (!snap.exists()) {
+    throw new Error(`No se encontró el psicólogo con ID ${uid} en Firestore.`);
+  }
+  const current = snap.data() as PsychologistAuthUser;
+  const updated: PsychologistAuthUser = {
+    ...current,
+    isApproved: false,
+    approvalStatus: 'REJECTED',
+    rejectionReason: reason || 'Acceso revocado o no autorizado por la Dirección Clínica',
+    permissions: {
+      lectura: false,
+      escritura: false,
+      administrativo: false,
+    },
+  };
+  await savePsychologistProfile(updated);
+  return updated;
+}
+
+/**
+ * Delete a psychologist profile from Firestore
+ */
+export async function deletePsychologistFromFirestore(uid: string): Promise<void> {
+  const docRef = doc(db, 'psychologists', uid);
+  await deleteDoc(docRef);
 }
 
 /**
@@ -261,40 +346,55 @@ export async function signInWithGoogle(): Promise<{ user: PsychologistAuthUser; 
     if (isUserAdmin(userEmail)) {
       const adminProfile = createAdminProfile(
         user.email || ADMIN_EMAILS[0],
-        user.displayName || 'Administrador General (Psybot)',
+        user.displayName || 'Administrador Clínico (kailabwasd)',
         user.photoURL || undefined
       );
       await savePsychologistProfile(adminProfile);
       return { user: adminProfile, isNewOrIncomplete: false };
     }
 
-    const existing = await getPsychologistFromFirestore(user.uid);
+    // Proactive check in Firestore by UID and by email
+    let existing = await getPsychologistFromFirestore(user.uid);
+    if (!existing && user.email) {
+      existing = await findPsychologistByEmail(user.email);
+    }
 
     if (existing && existing.profileCompleted && existing.license?.trim()) {
+      existing.lastLoginAt = Date.now();
+      await savePsychologistProfile(existing);
       localStorage.setItem('psybot_psychologist_session', JSON.stringify(existing));
       return { user: existing, isNewOrIncomplete: false };
     }
 
-    // Prepare draft user requiring profile completion
+    // Prepare draft user requiring profile completion (Tarjeta Profesional / ReTHUS) and admin authorization
+    const isSuperAdmin = isUserAdmin(user.email);
     const draftUser: PsychologistAuthUser = {
       uid: user.uid,
       email: user.email || '',
-      displayName: user.displayName || '',
-      photoURL: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(user.displayName || user.uid)}`,
+      displayName: user.displayName || existing?.displayName || '',
+      photoURL: user.photoURL || existing?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(user.displayName || user.uid)}`,
       provider: 'google.com',
       role: existing?.role || 'Psicólogo(a) Clínico Titulado(a)',
       license: existing?.license || '',
       specialty: existing?.specialty || 'Atención Psicológica y Triage de Crisis',
       institution: existing?.institution || 'Subred Integrada de Servicios de Salud Norte - Suba',
       phone: existing?.phone || '',
-      termsAccepted: existing?.termsAccepted ?? false,
-      profileCompleted: false,
+      termsAccepted: existing?.termsAccepted ?? true,
+      profileCompleted: Boolean(existing?.license?.trim()),
+      isApproved: isSuperAdmin ? true : (existing?.isApproved ?? false),
+      approvalStatus: isSuperAdmin ? 'APPROVED' : (existing?.approvalStatus ?? 'PENDING'),
+      isAdmin: isSuperAdmin,
+      permissions: {
+        lectura: isSuperAdmin || Boolean(existing?.isApproved),
+        escritura: isSuperAdmin || Boolean(existing?.isApproved),
+        administrativo: isSuperAdmin,
+      },
       createdAt: existing?.createdAt || Date.now(),
       lastLoginAt: Date.now(),
     };
 
     localStorage.setItem('psybot_psychologist_session', JSON.stringify(draftUser));
-    return { user: draftUser, isNewOrIncomplete: true };
+    return { user: draftUser, isNewOrIncomplete: !draftUser.profileCompleted };
   } catch (error: any) {
     console.error('Error al iniciar sesión con Google:', error);
     throw error;
@@ -304,146 +404,111 @@ export async function signInWithGoogle(): Promise<{ user: PsychologistAuthUser; 
 }
 
 /**
- * Sign in Psychologist with GitHub OAuth
- */
-export async function signInWithGithub(): Promise<{ user: PsychologistAuthUser; isNewOrIncomplete: boolean }> {
-  try {
-    isSigningIn = true;
-    const result = await signInWithPopup(auth, githubProvider);
-    const credential = GithubAuthProvider.credentialFromResult(result);
-    if (credential?.accessToken) {
-      cachedAccessToken = credential.accessToken;
-    }
-
-    const { user } = result;
-    const existing = await getPsychologistFromFirestore(user.uid);
-
-    if (existing && existing.profileCompleted && existing.license?.trim()) {
-      localStorage.setItem('subatech_psychologist_session', JSON.stringify(existing));
-      return { user: existing, isNewOrIncomplete: false };
-    }
-
-    const draftUser: PsychologistAuthUser = {
-      uid: user.uid,
-      email: user.email || `${user.providerData[0]?.displayName?.toLowerCase().replace(/\s+/g, '') || 'psicologo'}@subatech.salud`,
-      displayName: user.displayName || 'Profesional de Salud Mental',
-      photoURL: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(user.displayName || user.uid)}`,
-      provider: 'github.com',
-      role: existing?.role || 'Psicólogo(a) Especialista en Intervención',
-      license: existing?.license || '', // empty so user must fill
-      specialty: existing?.specialty || 'Psicoterapia Cognitivo-Conductual & Urgencias',
-      institution: existing?.institution || 'Subred Integrada de Servicios de Salud Norte - Suba',
-      phone: existing?.phone || '',
-      termsAccepted: existing?.termsAccepted ?? false,
-      profileCompleted: false,
-      createdAt: existing?.createdAt || Date.now(),
-      lastLoginAt: Date.now(),
-    };
-
-    localStorage.setItem('subatech_psychologist_session', JSON.stringify(draftUser));
-    return { user: draftUser, isNewOrIncomplete: true };
-  } catch (error: any) {
-    console.error('Error al iniciar sesión con GitHub:', error);
-    throw error;
-  } finally {
-    isSigningIn = false;
-  }
-}
-
-/**
- * Sign in Psychologist directly with GitHub username/email
- */
-export async function signInWithGithubDirect(githubHandleOrEmail: string, displayName?: string): Promise<{ user: PsychologistAuthUser; isNewOrIncomplete: boolean }> {
-  const cleanInput = githubHandleOrEmail.trim().replace(/^@/, '');
-  const isEmail = cleanInput.includes('@');
-  const email = isEmail ? cleanInput.toLowerCase() : `${cleanInput.toLowerCase()}@users.noreply.github.com`;
-  const name = displayName || cleanInput;
-  const uid = `github-${cleanInput.toLowerCase().replace(/[^a-zA-Z0-9]/g, '_')}`;
-
-  const existing = await getPsychologistFromFirestore(uid);
-
-  if (existing && existing.profileCompleted && existing.license?.trim()) {
-    localStorage.setItem('subatech_psychologist_session', JSON.stringify(existing));
-    localStorage.setItem('psybot_psychologist_session', JSON.stringify(existing));
-    return { user: existing, isNewOrIncomplete: false };
-  }
-
-  const draftUser: PsychologistAuthUser = {
-    uid,
-    email,
-    displayName: name,
-    photoURL: `https://github.com/${cleanInput.split('@')[0]}.png`,
-    provider: 'github.com',
-    role: existing?.role || 'Psicólogo(a) Especialista en Intervención',
-    license: existing?.license || '',
-    specialty: existing?.specialty || 'Psicoterapia Cognitivo-Conductual & Urgencias',
-    institution: existing?.institution || 'Subred Integrada de Servicios de Salud Norte - Suba',
-    phone: existing?.phone || '',
-    termsAccepted: existing?.termsAccepted ?? true,
-    profileCompleted: false,
-    createdAt: existing?.createdAt || Date.now(),
-    lastLoginAt: Date.now(),
-  };
-
-  localStorage.setItem('subatech_psychologist_session', JSON.stringify(draftUser));
-  localStorage.setItem('psybot_psychologist_session', JSON.stringify(draftUser));
-  return { user: draftUser, isNewOrIncomplete: true };
-}
-
-/**
- * Sign in or Register with Email and Password
+ * Sign in or Register with Email and Password, actively checking Firestore database
  */
 export async function signInWithEmailPassword(
   email: string, 
   pass: string, 
-  isRegistering: boolean
+  isRegistering: boolean,
+  initialDetails?: {
+    fullName?: string;
+    license?: string;
+    specialty?: string;
+    phone?: string;
+    institution?: string;
+  }
 ): Promise<{ user: PsychologistAuthUser; isNewOrIncomplete: boolean }> {
+  const cleanEmail = (email || '').trim().toLowerCase();
+  isSigningIn = true;
+
   try {
-    isSigningIn = true;
-    let userCredential;
-    if (isRegistering) {
-      userCredential = await createUserWithEmailAndPassword(auth, email, pass);
+    // 1. Proactive lookup in Firestore
+    const existingInDb = await findPsychologistByEmail(cleanEmail);
+
+    if (!isRegistering) {
+      // User is attempting to LOG IN: verify if account exists in Firestore
+      if (!existingInDb) {
+        throw new Error(`No encontramos una cuenta de especialista registrada con el correo "${cleanEmail}" en la base de datos de Firestore. Por favor selecciona "Crear Cuenta" para registrarte con tu Tarjeta Profesional.`);
+      }
+
+      // Existing Firestore user: Authenticate with Firebase Auth
+      const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, pass);
+      const { user } = userCredential;
+      const latest = (await getPsychologistFromFirestore(user.uid)) || existingInDb;
+      latest.lastLoginAt = Date.now();
+      await savePsychologistProfile(latest);
+      localStorage.setItem('psybot_psychologist_session', JSON.stringify(latest));
+      return { 
+        user: latest, 
+        isNewOrIncomplete: !latest.profileCompleted || !latest.license?.trim() 
+      };
     } else {
-      userCredential = await signInWithEmailAndPassword(auth, email, pass);
+      // User is attempting to REGISTER: verify Firestore to prevent duplicate email or license
+      if (existingInDb) {
+        throw new Error(`El correo "${cleanEmail}" ya está registrado en la base de datos oficial de Firestore. Por favor selecciona "Iniciar Sesión".`);
+      }
+
+      if (initialDetails?.license) {
+        const existingByLicense = await findPsychologistByLicense(initialDetails.license);
+        if (existingByLicense) {
+          throw new Error(`La Tarjeta Profesional "${initialDetails.license}" ya se encuentra registrada en Firestore por otro especialista.`);
+        }
+      }
+
+      let userCredential;
+      try {
+        userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
+      } catch (authErr: any) {
+        if (authErr?.code === 'auth/email-already-in-use') {
+          throw new Error(`Este correo ya está registrado en el sistema. Por favor selecciona "Iniciar Sesión".`);
+        }
+        throw authErr;
+      }
+
+      const { user } = userCredential;
+      const hasValidLicense = Boolean(initialDetails?.license && initialDetails.license.trim().length >= 4);
+      const isSuperAdmin = isUserAdmin(cleanEmail);
+
+      const newPsychologist: PsychologistAuthUser = {
+        uid: user.uid,
+        email: cleanEmail,
+        displayName: initialDetails?.fullName?.trim() || cleanEmail.split('@')[0],
+        photoURL: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(initialDetails?.fullName || cleanEmail)}`,
+        provider: 'email',
+        role: 'Psicólogo(a) Clínico Titulado(a)',
+        license: initialDetails?.license?.trim() || '',
+        specialty: initialDetails?.specialty?.trim() || 'Atención Psicológica y Triage de Crisis',
+        institution: initialDetails?.institution?.trim() || 'Subred Integrada de Servicios de Salud Norte - Suba',
+        phone: initialDetails?.phone?.trim() || '',
+        termsAccepted: true,
+        profileCompleted: hasValidLicense,
+        isApproved: isSuperAdmin ? true : false,
+        approvalStatus: isSuperAdmin ? 'APPROVED' : 'PENDING',
+        isAdmin: isSuperAdmin,
+        permissions: {
+          lectura: isSuperAdmin,
+          escritura: isSuperAdmin,
+          administrativo: isSuperAdmin,
+        },
+        createdAt: Date.now(),
+        lastLoginAt: Date.now(),
+      };
+
+      // Immediately write the new psychologist to Firestore
+      await savePsychologistProfile(newPsychologist);
+
+      return { 
+        user: newPsychologist, 
+        isNewOrIncomplete: !hasValidLicense 
+      };
     }
-
-    const { user } = userCredential;
-    const existing = await getPsychologistFromFirestore(user.uid);
-
-    if (existing && existing.profileCompleted && existing.license?.trim()) {
-      localStorage.setItem('subatech_psychologist_session', JSON.stringify(existing));
-      return { user: existing, isNewOrIncomplete: false };
-    }
-
-    const draftUser: PsychologistAuthUser = {
-      uid: user.uid,
-      email: user.email || email,
-      displayName: user.displayName || email.split('@')[0],
-      photoURL: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(email)}`,
-      provider: 'email',
-      role: existing?.role || 'Psicólogo(a) Clínico Titulado(a)',
-      license: existing?.license || '',
-      specialty: existing?.specialty || 'Triage y Atención Psicológica',
-      institution: existing?.institution || 'Subred Integrada de Servicios de Salud Norte - Suba',
-      phone: existing?.phone || '',
-      termsAccepted: existing?.termsAccepted ?? false,
-      profileCompleted: false,
-      createdAt: existing?.createdAt || Date.now(),
-      lastLoginAt: Date.now(),
-    };
-
-    localStorage.setItem('subatech_psychologist_session', JSON.stringify(draftUser));
-    return { user: draftUser, isNewOrIncomplete: true };
-  } catch (error: any) {
-    console.error('Email auth error:', error);
-    throw error;
   } finally {
     isSigningIn = false;
   }
 }
 
 /**
- * Check existing stored session
+ * List real psychologists from Firestore
  */
 export async function listPsychologistsFromFirestore(): Promise<PsychologistAuthUser[]> {
   try {
@@ -451,18 +516,50 @@ export async function listPsychologistsFromFirestore(): Promise<PsychologistAuth
     const snapshot = await getDocs(colRef);
     const list: PsychologistAuthUser[] = [];
     snapshot.forEach((docSnap: DocumentData) => {
-      list.push(docSnap.data() as PsychologistAuthUser);
+      const data = docSnap.data() as PsychologistAuthUser;
+      if (data && data.email) {
+        list.push(data);
+      }
     });
-    // Include current admin owner if not in list
+
+    // Ensure the system administrator is in the list
     if (!list.some(p => p.email === 'kailabwasd@gmail.com')) {
-      list.unshift(createAdminProfile('kailabwasd@gmail.com', 'Kailabwasd Owner', undefined));
+      const admin = createAdminProfile('kailabwasd@gmail.com', 'Administrador Clínico (kailabwasd)', undefined);
+      list.unshift(admin);
+      // Persist in background to Firestore
+      setDoc(doc(db, 'psychologists', admin.uid), admin, { merge: true }).catch(() => {});
     }
+
     return list;
   } catch (err: any) {
     console.warn('Could not fetch psychologists list, using local cache:', err);
     reportFirestoreCriticalError(err, 'Listar Psicólogos desde Firestore', 'psychologists').catch(() => {});
-    return [createAdminProfile('kailabwasd@gmail.com', 'Kailabwasd Owner', undefined)];
+    return [createAdminProfile('kailabwasd@gmail.com', 'Administrador Clínico (kailabwasd)', undefined)];
   }
+}
+
+/**
+ * Subscribe to real-time updates of psychologists in Firestore
+ */
+export function subscribeToPsychologists(callback: (list: PsychologistAuthUser[]) => void): () => void {
+  const colRef = collection(db, 'psychologists');
+  return onSnapshot(colRef, (snapshot) => {
+    const list: PsychologistAuthUser[] = [];
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data() as PsychologistAuthUser;
+      if (data && data.email) {
+        list.push(data);
+      }
+    });
+
+    if (!list.some(p => p.email === 'kailabwasd@gmail.com')) {
+      list.unshift(createAdminProfile('kailabwasd@gmail.com', 'Administrador Clínico (kailabwasd)', undefined));
+    }
+
+    callback(list);
+  }, (err) => {
+    console.warn('Real-time psychologists subscription warning:', err);
+  });
 }
 export function getStoredPsychologist(): PsychologistAuthUser | null {
   try {

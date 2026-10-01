@@ -34,6 +34,7 @@ import { ClinicalReportModal } from './components/ClinicalReportModal.tsx';
 import { ClinicalRecordsView } from './components/ClinicalRecordsView.tsx';
 import { PsychologistLogin } from './components/PsychologistLogin.tsx';
 import { CreatePsychologistProfile } from './components/CreatePsychologistProfile.tsx';
+import { PendingApprovalScreen } from './components/PendingApprovalScreen.tsx';
 import { CookieConsentBanner } from './components/CookieConsentBanner.tsx';
 import { SettingsModal } from './components/SettingsModal.tsx';
 import { AccessibilityModal } from './components/AccessibilityModal.tsx';
@@ -68,6 +69,7 @@ import {
   isUserAdmin,
   createAdminProfile,
   listPsychologistsFromFirestore,
+  subscribeToPsychologists,
   savePsychologistProfile
 } from './lib/firebase.ts';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -81,11 +83,17 @@ export default function App() {
   const [isCompletingProfile, setIsCompletingProfile] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'profile' | 'twofactor' | 'admins' | 'patients' | 'errorlogs' | 'theme' | 'audit' | 'crisiskeywords'>('profile');
   const [isAccessibilityOpen, setIsAccessibilityOpen] = useState(false);
   const [showLegalModal, setShowLegalModal] = useState(false);
   const [legalTab, setLegalTab] = useState<LegalTabType>('PRIVACY');
   const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'subatech'>('subatech');
   const [allPsychologists, setAllPsychologists] = useState<PsychologistAuthUser[]>([]);
+
+  // Count of psychologists waiting for Administrator authorization
+  const pendingApprovalsCount = allPsychologists.filter(
+    p => !p.isAdmin && p.email !== 'kailabwasd@gmail.com' && (p.approvalStatus === 'PENDING' || p.isApproved === false)
+  ).length;
 
   // Routing and Subdomain Navigation State
   const [currentRoute, setCurrentRoute] = useState<AppRoute>(() => parseCurrentRoute());
@@ -340,7 +348,7 @@ export default function App() {
             email: firebaseUser.email,
             displayName: firebaseUser.displayName || '',
             photoURL: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(firebaseUser.displayName || firebaseUser.uid)}`,
-            provider: firebaseUser.providerData[0]?.providerId || 'google.com',
+            provider: (firebaseUser.providerData[0]?.providerId === 'password' ? 'email' : 'google.com'),
             role: 'Psicólogo(a) Clínico Titulado(a)',
             license: '',
             specialty: 'Psicología Clínica y Triage de Crisis',
@@ -372,14 +380,28 @@ export default function App() {
     };
   }, []);
 
-  // Fetch psychologists list on boot
+  // Real-time synchronization of psychologists directory and current user approval from Firestore
   useEffect(() => {
-    listPsychologistsFromFirestore().then((list) => {
-      setAllPsychologists(list);
-    }).catch((err) => {
-      console.warn('Could not load psychologists list on boot:', err);
+    const unsubscribe = subscribeToPsychologists((list) => {
+      if (list && list.length > 0) {
+        setAllPsychologists(list);
+        if (currentUser) {
+          const freshCurrent = list.find(p => p.uid === currentUser.uid);
+          if (
+            freshCurrent && (
+              freshCurrent.approvalStatus !== currentUser.approvalStatus ||
+              freshCurrent.isApproved !== currentUser.isApproved ||
+              freshCurrent.role !== currentUser.role ||
+              freshCurrent.isAdmin !== currentUser.isAdmin
+            )
+          ) {
+            setCurrentUser(freshCurrent);
+          }
+        }
+      }
     });
-  }, []);
+    return () => unsubscribe();
+  }, [currentUser?.uid, currentUser?.approvalStatus, currentUser?.isApproved, currentUser?.role, currentUser?.isAdmin]);
 
   // Central Router Handler: supports accounts, protection, and browser history
   const handleNavigate = (rawRoute: AppRoute | string, replace = false) => {
@@ -891,6 +913,24 @@ export default function App() {
           onProfileSaved={(saved) => {
             setCurrentUser(saved);
             setIsCompletingProfile(false);
+          }}
+        />
+        <CookieConsentBanner />
+      </>
+    );
+  }
+
+  // 3.5. Mandatory Administrator Authorization Gate:
+  // When a psychologist registers, an administrator must authorize their access to the website through the Admin Portal
+  const isApproved = isUserAdminRole || currentUser.approvalStatus === 'APPROVED' || currentUser.isApproved === true;
+  if (!isApproved) {
+    return (
+      <>
+        <PendingApprovalScreen
+          user={currentUser}
+          onLogout={handleLogout}
+          onApproved={(updatedUser) => {
+            setCurrentUser(updatedUser);
             handleNavigate('triage');
           }}
         />
@@ -927,8 +967,16 @@ export default function App() {
           onOpenSettings={async () => {
             const list = await listPsychologistsFromFirestore();
             setAllPsychologists(list);
+            setSettingsInitialTab('profile');
             setIsSettingsOpen(true);
           }}
+          onOpenAdminPortal={async () => {
+            const list = await listPsychologistsFromFirestore();
+            setAllPsychologists(list);
+            setSettingsInitialTab('admins');
+            setIsSettingsOpen(true);
+          }}
+          pendingApprovalsCount={pendingApprovalsCount}
           onOpenAccessibility={() => setIsAccessibilityOpen(true)}
           waitingCount={waitingCount}
           crisisCount={crisisCount}
@@ -1029,7 +1077,7 @@ export default function App() {
                   <Users className="w-4 h-4 text-cyan-400" />
                   <span>Directorio de Psicólogos</span>
                   <span className="text-[11px] px-2 py-0.5 rounded-full font-bold font-mono bg-cyan-900/60 text-cyan-200 border border-cyan-500/30">
-                    {allPsychologists.length || 1}
+                    {allPsychologists.length}
                   </span>
                 </button>
 
@@ -1063,6 +1111,37 @@ export default function App() {
                     </span>
                   )}
                 </button>
+
+                {/* Tab Portal de Administradores (Only for Administrator) */}
+                {isUserAdminRole && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const list = await listPsychologistsFromFirestore();
+                      setAllPsychologists(list);
+                      setSettingsInitialTab('admins');
+                      setIsSettingsOpen(true);
+                    }}
+                    className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 cursor-pointer ${
+                      pendingApprovalsCount > 0 
+                        ? 'bg-amber-400 text-slate-950 font-bold border-t-amber-300 shadow-sm animate-pulse' 
+                        : 'text-amber-300 hover:text-white hover:bg-white/10 border-t-transparent'
+                    }`}
+                    title="Portal de Administradores - Autorizaciones y Gestión de Usuarios"
+                  >
+                    <ShieldAlert className={`w-4 h-4 ${pendingApprovalsCount > 0 ? 'text-slate-950' : 'text-amber-400'}`} />
+                    <span>Portal Administrador</span>
+                    {pendingApprovalsCount > 0 ? (
+                      <span className="text-[11px] px-2 py-0.5 rounded-full font-bold font-mono bg-slate-950 text-amber-300 border border-amber-300">
+                        ⚠️ {pendingApprovalsCount} pendientes
+                      </span>
+                    ) : (
+                      <span className="text-[10px] px-1.5 py-0.2 rounded font-mono bg-amber-950/60 text-amber-300 border border-amber-500/30">
+                        Control
+                      </span>
+                    )}
+                  </button>
+                )}
               </nav>
 
               {/* Right Edge Subtle Fade Indicator */}
@@ -1306,12 +1385,13 @@ export default function App() {
         <SettingsModal
           currentUser={currentUser}
           onClose={() => setIsSettingsOpen(false)}
+          initialTab={settingsInitialTab}
           onUpdateUser={(updated) => {
             setCurrentUser(updated);
             savePsychologistProfile(updated);
           }}
           allPsychologists={allPsychologists}
-          onUpdatePsychologistRole={async (uid, isAdmin, role, permissions) => {
+          onUpdatePsychologistRole={async (uid, isAdmin, role, permissions, approvalStatus, isApproved) => {
             const updatedList = allPsychologists.map(p => {
               if (p.uid === uid) {
                 return {
@@ -1319,6 +1399,8 @@ export default function App() {
                   isAdmin,
                   ...(role !== undefined ? { role } : {}),
                   ...(permissions !== undefined ? { permissions } : {}),
+                  ...(approvalStatus !== undefined ? { approvalStatus } : {}),
+                  ...(isApproved !== undefined ? { isApproved } : {}),
                 };
               }
               return p;

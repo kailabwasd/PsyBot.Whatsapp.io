@@ -88,8 +88,8 @@ const INITIAL_AUDIT_SEED: Omit<AuditLogEntry, 'id'>[] = [
   },
   {
     timestamp: Date.now() - 1000 * 60 * 240,
-    adminEmail: 'leandro.menendez1192@gmail.com',
-    adminName: 'Leandro Menéndez (Director Clínico)',
+    adminEmail: 'kailabwasd@gmail.com',
+    adminName: 'Super Administrador (kailabwasd)',
     action: 'SENSITIVE_ACCESS',
     severity: 'INFO',
     category: 'ACCESOS',

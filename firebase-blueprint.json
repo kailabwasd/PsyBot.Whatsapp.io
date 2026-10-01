@@ -79,7 +79,7 @@
     },
     "PsychologistUser": {
       "title": "PsychologistUser",
-      "description": "Perfil y credenciales de psicólogo o profesional de salud mental autenticado mediante Google o GitHub.",
+      "description": "Perfil y credenciales de psicólogo o profesional de salud mental autenticado mediante Google o correo electrónico institucional.",
       "type": "object",
       "properties": {
         "uid": {
@@ -100,8 +100,8 @@
         },
         "provider": {
           "type": "string",
-          "enum": ["google.com", "github.com", "custom", "demo"],
-          "description": "Método de autenticación utilizado"
+          "enum": ["google.com", "email"],
+          "description": "Método de autenticación oficial (Google OAuth o Correo Electrónico Institucional)"
         },
         "role": {
           "type": "string",
@@ -122,6 +122,15 @@
         "profileCompleted": {
           "type": "boolean",
           "description": "Indica si el usuario completó el formulario de registro sanitario y perfil clínico"
+        },
+        "isApproved": {
+          "type": "boolean",
+          "description": "Indica si el administrador clínico autorizó el acceso a la plataforma"
+        },
+        "approvalStatus": {
+          "type": "string",
+          "enum": ["PENDING", "APPROVED", "REJECTED"],
+          "description": "Estado de autorización por parte de la administración"
         },
         "institution": {
           "type": "string",

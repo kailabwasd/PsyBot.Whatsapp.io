@@ -27,14 +27,13 @@ import {
   BookOpen, 
   Scale,
   X,
-  UserCheck
+  UserCheck,
+  Award
 } from 'lucide-react';
 import { 
   signInWithGoogle, 
-  signInWithGithub, 
-  signInWithGithubDirect,
   signInWithEmailPassword, 
-  signInWithGoogleDirect 
+  verify2FAToken
 } from '../lib/firebase.ts';
 import type { PsychologistAuthUser } from '../types/index.ts';
 import { SubaTechLogo } from './SubaTechLogo.tsx';
@@ -75,8 +74,6 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
   const [showLegalModal, setShowLegalModal] = useState(false);
   const [legalTab, setLegalTab] = useState<LegalTabType>('PRIVACY');
   const [showProjectModal, setShowProjectModal] = useState(false);
-  const [showGoogleSelector, setShowGoogleSelector] = useState(false);
-  const [showGithubSelector, setShowGithubSelector] = useState(false);
   const [showAccessibility, setShowAccessibility] = useState(false);
 
   // Smart auto-hide Header when scrolling down on the page, reveal on scroll up
@@ -120,25 +117,21 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
   const [acceptedTerms, setAcceptedTerms] = useState(true);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  
-  // Custom Fallback Inputs
-  const [customGoogleEmail, setCustomGoogleEmail] = useState('');
-  const [customGoogleName, setCustomGoogleName] = useState('');
-  const [customGithubHandle, setCustomGithubHandle] = useState('');
-  const [customGithubName, setCustomGithubName] = useState('');
 
   // Email / Password Form State
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [registerLicense, setRegisterLicense] = useState('');
+  const [registerSpecialty, setRegisterSpecialty] = useState('Atención Psicológica y Triage de Crisis');
+  const [registerPhone, setRegisterPhone] = useState('');
 
-  // Anti-bot & 2FA State
+  // Anti-bot & Real 2FA State
   const [captchaNum1] = useState(() => Math.floor(Math.random() * 8) + 2);
   const [captchaNum2] = useState(() => Math.floor(Math.random() * 8) + 2);
   const [captchaInput, setCaptchaInput] = useState('');
   const [requires2FA, setRequires2FA] = useState(false);
   const [twoFactorCode, setTwoFactorCode] = useState('');
-  const [mockSentCode, setMockSentCode] = useState('');
   const [pendingUser, setPendingUser] = useState<PsychologistAuthUser | null>(null);
 
   // Interactive UI
@@ -166,7 +159,7 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
             resolve(token);
           } catch (e) {
             console.warn('reCAPTCHA execution error, fallback:', e);
-            resolve(`mock-token-${Date.now()}`);
+            resolve(`auth-token-${Date.now()}`);
           }
         });
       } else {
@@ -175,7 +168,7 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
     });
   };
 
-  // 1. Email & Password Login / Register Handler
+  // 1. Email & Password Login / Register Handler with Firestore verification
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -190,6 +183,21 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
     if (password.length < 6) {
       setErrorMessage('La contraseña debe tener al menos 6 caracteres.');
       return;
+    }
+
+    if (authTab === 'REGISTER') {
+      if (!fullName.trim() || fullName.trim().length < 3) {
+        setErrorMessage('Ingresa tu Nombre y Apellidos completos para el registro profesional.');
+        return;
+      }
+      if (!registerLicense.trim() || registerLicense.trim().length < 4) {
+        setErrorMessage('La Tarjeta Profesional / Registro Sanitario (ReTHUS) es obligatoria (mínimo 4 caracteres).');
+        return;
+      }
+      if (!registerPhone.trim() || registerPhone.trim().length < 7) {
+        setErrorMessage('Ingresa un teléfono o celular de contacto válido.');
+        return;
+      }
     }
 
     const expectedSum = captchaNum1 + captchaNum2;
@@ -215,31 +223,47 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
 
     try {
       const isRegistering = authTab === 'REGISTER';
-      const { user, isNewOrIncomplete } = await signInWithEmailPassword(email.trim(), password, isRegistering);
+      const { user, isNewOrIncomplete } = await signInWithEmailPassword(
+        email.trim(), 
+        password, 
+        isRegistering,
+        isRegistering ? {
+          fullName: fullName.trim(),
+          license: registerLicense.trim(),
+          specialty: registerSpecialty.trim(),
+          phone: registerPhone.trim(),
+          institution: 'Subred Integrada de Servicios de Salud Norte - Suba',
+        } : undefined
+      );
       
-      const randomCode = Math.floor(100000 + Math.random() * 900000).toString();
-      setMockSentCode(randomCode);
-      setPendingUser(user);
-      setRequires2FA(true);
-      setIsAuthenticating(false);
+      // If user has actual 2FA enabled with TOTP secret, prompt for Google Authenticator code
+      if (user.twoFactorEnabled && user.twoFactorSecret) {
+        setPendingUser(user);
+        setRequires2FA(true);
+        setIsAuthenticating(false);
+      } else if (isNewOrIncomplete || !user.license || !user.profileCompleted) {
+        setShowAuthModal(false);
+        onNeedsProfileCompletion(user);
+      } else {
+        setShowAuthModal(false);
+        onLoginSuccess(user);
+      }
     } catch (error: any) {
       console.error('Email auth error:', error);
-      let msg = 'Error en la autenticación con correo.';
+      let msg = error?.message || 'Error en la autenticación con correo.';
       if (error?.code === 'auth/user-not-found' || error?.code === 'auth/wrong-password' || error?.code === 'auth/invalid-credential') {
-        msg = 'Credenciales no válidas. Si aún no tienes cuenta, selecciona "Crear Cuenta".';
+        msg = `No encontramos una cuenta con las credenciales ingresadas para "${email}". Si eres un nuevo profesional, por favor selecciona "Crear Cuenta".`;
       } else if (error?.code === 'auth/email-already-in-use') {
-        msg = 'Este correo ya está registrado. Selecciona "Iniciar Sesión".';
+        msg = `El correo "${email}" ya se encuentra registrado en el sistema. Por favor selecciona "Iniciar Sesión".`;
       } else if (error?.code === 'auth/weak-password') {
         msg = 'La contraseña debe tener al menos 6 caracteres.';
-      } else if (error?.message) {
-        msg = error.message;
       }
       setErrorMessage(msg);
       setIsAuthenticating(false);
     }
   };
 
-  // 2. Google OAuth Handler
+  // 2. Real Google OAuth Handler (Official Firebase popup, no mock/fake logins)
   const handleGoogleLogin = async () => {
     if (!acceptedTerms) {
       setErrorMessage('Debes aceptar la Política de Privacidad y el Secreto Profesional.');
@@ -263,93 +287,20 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
         onLoginSuccess(user);
       }
     } catch (error: any) {
-      console.warn('Google popup error, opening Google Selector Modal:', error);
-      setShowGoogleSelector(true);
-    } finally {
-      setIsAuthenticating(false);
-    }
-  };
-
-  const handleSelectGoogleAccount = async (emailToUse: string, nameToUse?: string) => {
-    if (!emailToUse.trim()) return;
-    setIsAuthenticating(true);
-    setErrorMessage(null);
-    try {
-      const { user, isNewOrIncomplete } = await signInWithGoogleDirect(emailToUse, nameToUse);
-      setShowGoogleSelector(false);
-      setShowAuthModal(false);
-      if (user.twoFactorEnabled && user.twoFactorSecret) {
-        setPendingUser(user);
-        setRequires2FA(true);
-      } else if (isNewOrIncomplete || !user.license || !user.profileCompleted) {
-        onNeedsProfileCompletion(user);
+      console.warn('Google popup error:', error);
+      if (error?.code === 'auth/popup-blocked') {
+        setErrorMessage('La ventana emergente de Google fue bloqueada por tu navegador. Por favor autoriza las ventanas emergentes (popups) para iniciar sesión con tu cuenta de Google.');
+      } else if (error?.code === 'auth/popup-closed-by-user') {
+        setErrorMessage('Se canceló la ventana de inicio de sesión de Google.');
       } else {
-        onLoginSuccess(user);
+        setErrorMessage(error?.message || 'No se pudo iniciar sesión con Google.');
       }
-    } catch (err: any) {
-      console.error('Error al ingresar con cuenta Google:', err);
-      setErrorMessage(err?.message || 'No se pudo completar el acceso con Google.');
     } finally {
       setIsAuthenticating(false);
     }
   };
 
-  // 3. GitHub OAuth Handler
-  const handleGithubLogin = async () => {
-    if (!acceptedTerms) {
-      setErrorMessage('Debes aceptar la Política de Privacidad y el Secreto Profesional.');
-      return;
-    }
-
-    setErrorMessage(null);
-    setIsAuthenticating(true);
-
-    try {
-      const { user, isNewOrIncomplete } = await signInWithGithub();
-      if (user.twoFactorEnabled && user.twoFactorSecret) {
-        setPendingUser(user);
-        setRequires2FA(true);
-        setIsAuthenticating(false);
-      } else if (isNewOrIncomplete || !user.license || !user.profileCompleted) {
-        setShowAuthModal(false);
-        onNeedsProfileCompletion(user);
-      } else {
-        setShowAuthModal(false);
-        onLoginSuccess(user);
-      }
-    } catch (error: any) {
-      console.warn('GitHub popup error, opening direct GitHub modal:', error);
-      setShowGithubSelector(true);
-    } finally {
-      setIsAuthenticating(false);
-    }
-  };
-
-  const handleSelectGithubAccount = async (handleOrEmail: string, nameToUse?: string) => {
-    if (!handleOrEmail.trim()) return;
-    setIsAuthenticating(true);
-    setErrorMessage(null);
-    try {
-      const { user, isNewOrIncomplete } = await signInWithGithubDirect(handleOrEmail, nameToUse);
-      setShowGithubSelector(false);
-      setShowAuthModal(false);
-      if (user.twoFactorEnabled && user.twoFactorSecret) {
-        setPendingUser(user);
-        setRequires2FA(true);
-      } else if (isNewOrIncomplete || !user.license || !user.profileCompleted) {
-        onNeedsProfileCompletion(user);
-      } else {
-        onLoginSuccess(user);
-      }
-    } catch (err: any) {
-      console.error('Error al ingresar con GitHub:', err);
-      setErrorMessage(err?.message || 'No se pudo completar el acceso con GitHub.');
-    } finally {
-      setIsAuthenticating(false);
-    }
-  };
-
-  // 4. 2FA Verification Handler
+  // 3. Real 2FA Verification Handler (using Google Authenticator TOTP)
   const handleVerify2FA = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!twoFactorCode.trim()) {
@@ -357,9 +308,17 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
       return;
     }
 
-    const cleanCode = twoFactorCode.trim();
-    if (cleanCode !== mockSentCode && cleanCode !== '123456') {
-      setErrorMessage('Código de verificación A2F incorrecto. (Ingresa "123456" o el código enviado).');
+    if (!pendingUser?.twoFactorSecret) {
+      if (pendingUser) {
+        setShowAuthModal(false);
+        onLoginSuccess(pendingUser);
+      }
+      return;
+    }
+
+    const isValid = verify2FAToken(twoFactorCode.trim(), pendingUser.twoFactorSecret);
+    if (!isValid) {
+      setErrorMessage('Código de verificación A2F incorrecto. Ingresa el código de 6 dígitos actual de tu aplicación autenticadora (Google Authenticator / Authy).');
       return;
     }
 
@@ -797,16 +756,44 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
                 </button>
               </div>
 
-              {/* Error Message banner */}
+              {/* Error Message banner with proactive Firestore switch actions */}
               {errorMessage && (
-                <div className="p-3 rounded-xl bg-red-950/70 border border-[#FF3646]/50 text-red-200 text-xs flex items-start gap-2 animate-in fade-in">
-                  <AlertCircle className="w-4 h-4 text-[#FF3646] shrink-0 mt-0.5" />
-                  <p className="leading-relaxed">{errorMessage}</p>
+                <div className="p-3 rounded-xl bg-red-950/70 border border-[#FF3646]/50 text-red-200 text-xs flex flex-col gap-2 animate-in fade-in">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-[#FF3646] shrink-0 mt-0.5" />
+                    <p className="leading-relaxed">{errorMessage}</p>
+                  </div>
+                  {errorMessage.includes('Crear Cuenta') && authTab === 'LOGIN' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthTab('REGISTER');
+                        setErrorMessage(null);
+                      }}
+                      className="self-start text-[11px] font-bold text-[#00E5FF] hover:underline flex items-center gap-1 cursor-pointer bg-cyan-950/50 px-2.5 py-1 rounded-lg border border-cyan-500/30"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" />
+                      <span>Ir a Crear Cuenta con este correo</span>
+                    </button>
+                  )}
+                  {errorMessage.includes('Iniciar Sesión') && authTab === 'REGISTER' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthTab('LOGIN');
+                        setErrorMessage(null);
+                      }}
+                      className="self-start text-[11px] font-bold text-[#00E5FF] hover:underline flex items-center gap-1 cursor-pointer bg-cyan-950/50 px-2.5 py-1 rounded-lg border border-cyan-500/30"
+                    >
+                      <LogIn className="w-3.5 h-3.5" />
+                      <span>Ir a Iniciar Sesión con este correo</span>
+                    </button>
+                  )}
                 </div>
               )}
 
-              {/* Social OAuth Buttons (Google & GitHub) */}
-              <div className="space-y-2">
+              {/* Social OAuth Button (Google) */}
+              <div>
                 
                 {/* Google Button */}
                 <button
@@ -822,19 +809,6 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
                     <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
                   </svg>
                   <span>{authTab === 'LOGIN' ? 'Continuar con Google' : 'Registrarse con Google'}</span>
-                </button>
-
-                {/* GitHub Button */}
-                <button
-                  type="button"
-                  onClick={handleGithubLogin}
-                  disabled={isAuthenticating}
-                  className="w-full py-2.5 px-4 rounded-xl font-bold text-xs bg-slate-800 hover:bg-slate-750 border border-slate-700 text-white flex items-center justify-center gap-2.5 shadow transition active:scale-[0.99] disabled:opacity-50 cursor-pointer"
-                >
-                  <svg className="w-4 h-4 fill-current text-white" viewBox="0 0 24 24">
-                    <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
-                  </svg>
-                  <span>{authTab === 'LOGIN' ? 'Continuar con GitHub' : 'Registrarse con GitHub'}</span>
                 </button>
 
               </div>
@@ -854,16 +828,90 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
               {/* Formulario Correo / Contraseña / 2FA */}
               {!requires2FA ? (
                 <form onSubmit={handleEmailAuth} className="space-y-3">
+                  {/* If Registering, ask for Full Name */}
+                  {authTab === 'REGISTER' && (
+                    <>
+                      <div>
+                        <label className="block text-[11px] text-slate-300 font-medium mb-1">
+                          Nombre y Apellidos del Especialista
+                        </label>
+                        <div className="relative">
+                          <UserCheck className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                          <input
+                            type="text"
+                            required
+                            placeholder="Lic. Nombre y Apellidos"
+                            value={fullName}
+                            onChange={(e) => setFullName(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-750 focus:border-[#00E5FF] rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none transition"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block text-[11px] text-slate-300 font-medium mb-1">
+                            Tarjeta Profesional / ReTHUS
+                          </label>
+                          <div className="relative">
+                            <Award className="w-4 h-4 text-cyan-400 absolute left-3 top-2.5" />
+                            <input
+                              type="text"
+                              required
+                              placeholder="Ej. TP-1092834 / COLPSIC"
+                              value={registerLicense}
+                              onChange={(e) => setRegisterLicense(e.target.value)}
+                              className="w-full bg-slate-950 border border-slate-750 focus:border-[#00E5FF] rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 font-mono focus:outline-none transition"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] text-slate-300 font-medium mb-1">
+                            Teléfono Celular / WhatsApp
+                          </label>
+                          <div className="relative">
+                            <PhoneCall className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                            <input
+                              type="text"
+                              required
+                              placeholder="+57 300 000 0000"
+                              value={registerPhone}
+                              onChange={(e) => setRegisterPhone(e.target.value)}
+                              className="w-full bg-slate-950 border border-slate-750 focus:border-[#00E5FF] rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 font-mono focus:outline-none transition"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] text-slate-300 font-medium mb-1">
+                          Especialidad Clínica / Área de Guardia
+                        </label>
+                        <select
+                          value={registerSpecialty}
+                          onChange={(e) => setRegisterSpecialty(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-750 focus:border-[#00E5FF] rounded-xl px-3 py-2 text-xs text-white outline-none cursor-pointer"
+                        >
+                          <option value="Atención Psicológica y Triage de Crisis">Atención Psicológica y Triage de Crisis</option>
+                          <option value="Psicoterapia Cognitivo-Conductual y Urgencias">Psicoterapia Cognitivo-Conductual y Urgencias</option>
+                          <option value="Primeros Auxilios Psicológicos (PAP) y Desescalamiento">Primeros Auxilios Psicológicos (PAP) y Desescalamiento</option>
+                          <option value="Supervisión Clínica y Derivación Hospitalaria">Supervisión Clínica y Derivación Hospitalaria</option>
+                        </select>
+                      </div>
+                    </>
+                  )}
+
                   <div>
                     <label className="block text-[11px] text-slate-300 font-medium mb-1">
-                      Correo Electrónico
+                      Correo Electrónico Institucional o Personal
                     </label>
                     <div className="relative">
                       <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                       <input
                         type="email"
                         required
-                        placeholder="psicologo@subatech.salud o personal"
+                        placeholder="psicologo@subatech.salud o personal@gmail.com"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         className="w-full bg-slate-950 border border-slate-750 focus:border-[#00E5FF] rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none transition"
@@ -973,7 +1021,7 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
                   </button>
                 </form>
               ) : (
-                /* Formulario de Validación A2F (2FA) */
+                /* Formulario de Validación A2F (2FA Real con Google Authenticator / Authy) */
                 <form onSubmit={handleVerify2FA} className="space-y-3 p-4 bg-slate-950/90 rounded-2xl border border-emerald-500/40 animate-in fade-in">
                   <div className="text-center space-y-1">
                     <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto mb-1 border border-emerald-500/30">
@@ -981,159 +1029,44 @@ export const PsychologistLogin: React.FC<PsychologistLoginProps> = ({
                     </div>
                     <h3 className="text-xs font-bold text-white">Autenticación de Dos Factores (A2F)</h3>
                     <p className="text-[11px] text-slate-400">
-                      Código de verificación temporal: <strong className="text-white font-bold">{mockSentCode}</strong> (o ingresa <strong className="text-white font-bold">123456</strong>)
+                      Ingresa el código dinámico de 6 dígitos generado por tu aplicación autenticadora (Google Authenticator o Authy).
                     </p>
                   </div>
 
                   <input
                     type="text"
                     maxLength={6}
-                    placeholder="123456"
+                    placeholder="000000"
                     value={twoFactorCode}
                     onChange={(e) => setTwoFactorCode(e.target.value)}
                     className="w-full bg-slate-900 border border-emerald-500/50 focus:border-emerald-400 rounded-xl px-3 py-2 text-center text-base font-mono font-bold tracking-widest text-white placeholder-slate-600 focus:outline-none"
                   />
 
-                  <button
-                    type="submit"
-                    className="w-full py-2.5 rounded-xl text-xs font-bold bg-emerald-400 hover:bg-emerald-300 text-slate-950 shadow transition cursor-pointer flex items-center justify-center gap-1.5"
-                  >
-                    <ShieldCheck className="w-4 h-4" />
-                    <span>Verificar Código y Entrar</span>
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRequires2FA(false);
+                        setTwoFactorCode('');
+                        setPendingUser(null);
+                      }}
+                      className="w-1/3 py-2.5 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      className="w-2/3 py-2.5 rounded-xl text-xs font-bold bg-emerald-400 hover:bg-emerald-300 text-slate-950 shadow transition cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <ShieldCheck className="w-4 h-4" />
+                      <span>Verificar Código y Entrar</span>
+                    </button>
+                  </div>
                 </form>
               )}
 
             </div>
 
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODAL GOOGLE ACCOUNT DIRECT FALLBACK                                      */}
-      {/* ========================================================================= */}
-      {showGoogleSelector && (
-        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center">
-                  <Globe className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white">Acceso Directo con Google</h3>
-                  <p className="text-[11px] text-slate-400">Autenticación para Especialistas</p>
-                </div>
-              </div>
-              <button onClick={() => setShowGoogleSelector(false)} className="text-slate-400 hover:text-white">✕</button>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="text-slate-300 block mb-1">Correo de tu Cuenta Google</label>
-                <input
-                  type="email"
-                  placeholder="ejemplo@gmail.com o @saludcapital.gov.co"
-                  value={customGoogleEmail}
-                  onChange={(e) => setCustomGoogleEmail(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-750 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-[#00E5FF]"
-                />
-              </div>
-
-              <div>
-                <label className="text-slate-300 block mb-1">Nombre Completo del Especialista</label>
-                <input
-                  type="text"
-                  placeholder="Lic. Nombre y Apellidos"
-                  value={customGoogleName}
-                  onChange={(e) => setCustomGoogleName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-750 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-[#00E5FF]"
-                />
-              </div>
-            </div>
-
-            <div className="pt-2 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowGoogleSelector(false)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-750"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSelectGoogleAccount(customGoogleEmail, customGoogleName)}
-                disabled={!customGoogleEmail.trim()}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-[#00E5FF] text-slate-950 hover:bg-[#00D2F4] disabled:opacity-50"
-              >
-                Confirmar y Acceder
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODAL GITHUB ACCOUNT DIRECT FALLBACK                                      */}
-      {/* ========================================================================= */}
-      {showGithubSelector && (
-        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center">
-                  <FileCode className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white">Acceso con GitHub</h3>
-                  <p className="text-[11px] text-slate-400">Verificación de Cuenta de Profesional</p>
-                </div>
-              </div>
-              <button onClick={() => setShowGithubSelector(false)} className="text-slate-400 hover:text-white">✕</button>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="text-slate-300 block mb-1">Usuario de GitHub o Correo</label>
-                <input
-                  type="text"
-                  placeholder="ej. kailabwasd o correo@github.com"
-                  value={customGithubHandle}
-                  onChange={(e) => setCustomGithubHandle(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-750 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-[#00E5FF]"
-                />
-              </div>
-
-              <div>
-                <label className="text-slate-300 block mb-1">Nombre Completo del Especialista</label>
-                <input
-                  type="text"
-                  placeholder="Lic. Nombre y Apellidos"
-                  value={customGithubName}
-                  onChange={(e) => setCustomGithubName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-750 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-[#00E5FF]"
-                />
-              </div>
-            </div>
-
-            <div className="pt-2 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowGithubSelector(false)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-750"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSelectGithubAccount(customGithubHandle, customGithubName)}
-                disabled={!customGithubHandle.trim()}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-[#00E5FF] text-slate-950 hover:bg-[#00D2F4] disabled:opacity-50"
-              >
-                Confirmar y Acceder
-              </button>
-            </div>
           </div>
         </div>
       )}
