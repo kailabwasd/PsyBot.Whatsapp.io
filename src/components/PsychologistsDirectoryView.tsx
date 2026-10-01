@@ -32,7 +32,8 @@ import {
   savePsychologistProfile, 
   findPsychologistByEmail, 
   findPsychologistByLicense,
-  approvePsychologist 
+  approvePsychologist,
+  isUserAdmin
 } from '../lib/firebase.ts';
 import { logAuditEvent } from './AuditLog.tsx';
 
@@ -68,7 +69,7 @@ export const PsychologistsDirectoryView: React.FC<PsychologistsDirectoryViewProp
   const [modalSuccess, setModalSuccess] = useState<string | null>(null);
 
   const isAuthenticated = Boolean(currentUser && currentUser.profileCompleted);
-  const isAdmin = Boolean(currentUser?.isAdmin || currentUser?.email === 'kailabwasd@gmail.com');
+  const isAdmin = Boolean(currentUser?.isAdmin || isUserAdmin(currentUser?.email));
 
   const handleQuickApprove = async (psych: PsychologistAuthUser) => {
     if (!isAdmin) return;
@@ -254,9 +255,9 @@ export const PsychologistsDirectoryView: React.FC<PsychologistsDirectoryViewProp
 
     let matchesApproval = true;
     if (approvalFilter === 'PENDING') {
-      matchesApproval = !psych.isAdmin && psych.email !== 'kailabwasd@gmail.com' && (psych.approvalStatus === 'PENDING' || (psych.isApproved === false && psych.approvalStatus !== 'REJECTED'));
+      matchesApproval = !psych.isAdmin && !isUserAdmin(psych.email) && (psych.approvalStatus === 'PENDING' || (psych.isApproved === false && psych.approvalStatus !== 'REJECTED'));
     } else if (approvalFilter === 'APPROVED') {
-      matchesApproval = psych.isAdmin || psych.email === 'kailabwasd@gmail.com' || psych.approvalStatus === 'APPROVED' || psych.isApproved === true;
+      matchesApproval = psych.isAdmin || isUserAdmin(psych.email) || psych.approvalStatus === 'APPROVED' || psych.isApproved === true;
     } else if (approvalFilter === 'REJECTED') {
       matchesApproval = psych.approvalStatus === 'REJECTED';
     }
@@ -420,7 +421,7 @@ export const PsychologistsDirectoryView: React.FC<PsychologistsDirectoryViewProp
               }`}
             >
               <Clock className="w-3.5 h-3.5" />
-              <span>Pendientes ({allPsychologists.filter(p => !p.isAdmin && p.email !== 'kailabwasd@gmail.com' && (p.approvalStatus === 'PENDING' || (p.isApproved === false && p.approvalStatus !== 'REJECTED'))).length})</span>
+              <span>Pendientes ({allPsychologists.filter(p => !p.isAdmin && !isUserAdmin(p.email) && (p.approvalStatus === 'PENDING' || (p.isApproved === false && p.approvalStatus !== 'REJECTED'))).length})</span>
             </button>
 
             <button
@@ -433,7 +434,7 @@ export const PsychologistsDirectoryView: React.FC<PsychologistsDirectoryViewProp
               }`}
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Autorizados ({allPsychologists.filter(p => p.isAdmin || p.email === 'kailabwasd@gmail.com' || p.approvalStatus === 'APPROVED' || p.isApproved === true).length})</span>
+              <span>Autorizados ({allPsychologists.filter(p => p.isAdmin || isUserAdmin(p.email) || p.approvalStatus === 'APPROVED' || p.isApproved === true).length})</span>
             </button>
           </div>
         </div>
@@ -450,7 +451,7 @@ export const PsychologistsDirectoryView: React.FC<PsychologistsDirectoryViewProp
         ) : (
           filteredPsychologists.map((psych) => {
             const isMe = Boolean(currentUser && psych.uid === currentUser.uid);
-            const isProtectedAdmin = psych.isAdmin || psych.email === 'kailabwasd@gmail.com';
+            const isProtectedAdmin = psych.isAdmin || isUserAdmin(psych.email);
             const isApproved = isProtectedAdmin || psych.approvalStatus === 'APPROVED' || psych.isApproved === true;
             const isPending = !isProtectedAdmin && (psych.approvalStatus === 'PENDING' || (psych.isApproved === false && psych.approvalStatus !== 'REJECTED'));
             const isRejected = !isProtectedAdmin && psych.approvalStatus === 'REJECTED';

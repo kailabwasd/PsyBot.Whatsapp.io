@@ -55,7 +55,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAdminPortal,
 }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const isAdmin = Boolean(currentUser.isAdmin || currentUser.email === 'kailabwasd@gmail.com');
+  const isAdmin = Boolean(currentUser.isAdmin || currentUser.email === 'kailabwasd@gmail.com' || currentUser.email === 'leandro.menendez1192@gmail.com');
 
   return (
     <header className="w-full shadow-sm text-xs">

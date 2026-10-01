@@ -94,7 +94,7 @@ export default function App() {
 
   // Count of psychologists waiting for Administrator authorization (only newly registered accounts in PENDING status)
   const pendingApprovalsCount = allPsychologists.filter(
-    p => !p.isAdmin && p.email !== 'kailabwasd@gmail.com' && (p.approvalStatus === 'PENDING' || (p.isApproved === false && p.approvalStatus !== 'REJECTED'))
+    p => !p.isAdmin && !isUserAdmin(p.email) && (p.approvalStatus === 'PENDING' || (p.isApproved === false && p.approvalStatus !== 'REJECTED'))
   ).length;
 
   // Routing and Subdomain Navigation State
@@ -968,7 +968,7 @@ export default function App() {
               details: `Inicio de sesión de ${user.displayName} (${user.email || 'sin correo'}). Tarjeta Profesional: ${user.license || 'N/A'}.`,
             }).catch(() => {});
 
-            if (user.isAdmin || user.email === 'kailabwasd@gmail.com') {
+            if (user.isAdmin || isUserAdmin(user.email)) {
               setIsCompletingProfile(false);
             } else {
               setIsCompletingProfile(!user.profileCompleted || !user.license?.trim());
@@ -976,7 +976,7 @@ export default function App() {
             handleNavigate('triage');
           }}
           onNeedsProfileCompletion={(draft) => {
-            if (draft.isAdmin || draft.email === 'kailabwasd@gmail.com') {
+            if (draft.isAdmin || isUserAdmin(draft.email)) {
               setCurrentUser(draft);
               setIsCompletingProfile(false);
             } else {
@@ -991,7 +991,7 @@ export default function App() {
   }
 
   // 3. User authenticated but must fill out their Sanitary Registration and Clinical Profile (Admin is exempted with full access)
-  const isUserAdminRole = Boolean(currentUser.isAdmin || currentUser.email === 'kailabwasd@gmail.com');
+  const isUserAdminRole = Boolean(currentUser.isAdmin || isUserAdmin(currentUser.email));
   if (!isUserAdminRole && (isCompletingProfile || !currentUser.profileCompleted || !currentUser.license?.trim())) {
     return (
       <>

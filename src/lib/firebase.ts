@@ -78,9 +78,10 @@ export function verify2FAToken(token: string, secret: string): boolean {
   }
 }
 
-// Authorized Administrator Real Accounts (kailabwasd@gmail.com)
+// Authorized Administrator Real Accounts (kailabwasd@gmail.com, leandro.menendez1192@gmail.com)
 export const ADMIN_EMAILS = [
-  'kailabwasd@gmail.com'
+  'kailabwasd@gmail.com',
+  'leandro.menendez1192@gmail.com'
 ];
 
 export function isUserAdmin(email?: string | null): boolean {

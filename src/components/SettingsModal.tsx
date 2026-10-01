@@ -51,7 +51,8 @@ import {
   savePsychologistProfile, 
   approvePsychologist, 
   rejectOrSuspendPsychologist, 
-  deletePsychologistFromFirestore 
+  deletePsychologistFromFirestore,
+  isUserAdmin
 } from '../lib/firebase.ts';
 import { AuditLog, logAuditEvent } from './AuditLog.tsx';
 import { 
@@ -230,7 +231,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [notifyNotice, setNotifyNotice] = useState<string | null>(null);
   const [testReportResult, setTestReportResult] = useState<{ success?: boolean; message?: string } | null>(null);
 
-  const isOwner = currentUser.email === 'kailabwasd@gmail.com' || currentUser.isAdmin;
+  const isOwner = isUserAdmin(currentUser.email) || currentUser.isAdmin;
 
   // Load error logs & Twilio config on mount and when tab changes to errorlogs
   const loadErrorLogsAndTwilioConfig = async () => {
@@ -1284,7 +1285,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     return true;
                   }).map((psych) => {
                     const draft = getPsychDraft(psych);
-                    const isProtectedOwner = psych.email === 'kailabwasd@gmail.com';
+                    const isProtectedOwner = isUserAdmin(psych.email);
                     const isApprovedUser = isProtectedOwner || psych.approvalStatus === 'APPROVED' || psych.isApproved === true;
                     const isPendingUser = !isProtectedOwner && (psych.approvalStatus === 'PENDING' || (psych.isApproved === false && psych.approvalStatus !== 'REJECTED'));
                     const isRejectedUser = !isProtectedOwner && psych.approvalStatus === 'REJECTED';
