@@ -2053,9 +2053,10 @@ app.post('/api/twilio/verify-credentials', async (req, res) => {
     const data: any = await response.json();
 
     if (response.ok) {
-      // Save valid verified credentials into runtime memory
+      // Save valid verified credentials into runtime memory and disk
       TWILIO_CONFIG.accountSid = sid;
       TWILIO_CONFIG.authToken = token;
+      saveTwilioConfigToFile();
 
       return res.json({
         success: true,
@@ -2130,11 +2131,22 @@ app.post('/api/twilio/test', async (req, res) => {
   }
 
   // Update in-memory credentials if passed in the test request
-  if (accountSid) TWILIO_CONFIG.accountSid = cleanCredential(accountSid);
-  if (authToken) TWILIO_CONFIG.authToken = cleanCredential(authToken);
+  let updatedCreds = false;
+  if (accountSid) {
+    TWILIO_CONFIG.accountSid = cleanCredential(accountSid);
+    updatedCreds = true;
+  }
+  if (authToken) {
+    TWILIO_CONFIG.authToken = cleanCredential(authToken);
+    updatedCreds = true;
+  }
   if (whatsappNumber) {
     const formatted = sanitizeWhatsAppNumber(cleanCredential(whatsappNumber));
     TWILIO_CONFIG.whatsappNumber = formatted || cleanCredential(whatsappNumber);
+    updatedCreds = true;
+  }
+  if (updatedCreds) {
+    saveTwilioConfigToFile();
   }
 
   const messageText = testMessage || '🟢 ¡Conexión con Psybot SubaTECH confirmada! Tu WhatsApp está vinculado exitosamente con la Guardia de Salud Mental 24/7.';
@@ -2143,6 +2155,7 @@ app.post('/api/twilio/test', async (req, res) => {
   const result = await sendTwilioWhatsAppMessage(target, messageText);
 
   if (result.success) {
+    saveTwilioConfigToFile();
     return res.json({
       success: true,
       message: 'Mensaje de prueba enviado exitosamente a WhatsApp.',
@@ -2506,39 +2519,6 @@ app.post('/api/twilio/sync', async (req, res) => {
     });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error?.message || 'Error syncing Twilio' });
-  }
-});
-
-// Twilio Diagnostic & Test Route
-app.post('/api/twilio/test', async (req, res) => {
-  const { toPhone, testMessage } = req.body;
-  if (!toPhone) {
-    return res.status(400).json({ error: 'Falta el número de teléfono destinatario (toPhone).' });
-  }
-
-  const sanitized = sanitizeWhatsAppNumber(toPhone);
-  if (!sanitized) {
-    return res.status(400).json({ 
-      error: 'Número de teléfono inválido. Debe estar en formato internacional E.164 con código de país (ejemplo: +573001234567 o whatsapp:+573001234567).' 
-    });
-  }
-
-  const messageText = testMessage || '🟢 PsyBot - SubaTech: Prueba de conexión exitosa con Twilio WhatsApp API.';
-  const result = await sendTwilioWhatsAppMessage(sanitized, messageText);
-
-  if (result.success) {
-    return res.json({ 
-      success: true, 
-      sid: result.sid,
-      to: sanitized,
-      message: `Mensaje de prueba despachado exitosamente hacia ${sanitized} (Twilio SID: ${result.sid})` 
-    });
-  } else {
-    return res.status(502).json({ 
-      success: false, 
-      to: sanitized,
-      error: result.error || 'No se pudo despachar el mensaje a través de Twilio. Verifica que el número esté unido a tu Sandbox enviando "join seldom-help" a +1 415 523 8886.' 
-    });
   }
 });
 
