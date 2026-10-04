@@ -1,13 +1,13 @@
 # Production Dockerfile for Railway & Container Deployments
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
 
-# Install all dependencies including build tools
-RUN npm ci
+# Install all dependencies including build tools (with fallback to npm install if lockfile has drift)
+RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
 
 # Copy project files
 COPY . .
@@ -16,7 +16,7 @@ COPY . .
 RUN npm run build
 
 # Production image
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 
 WORKDIR /app
 
@@ -28,7 +28,7 @@ ENV HOST=0.0.0.0
 COPY package*.json ./
 
 # Install production dependencies only
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --legacy-peer-deps || npm install --omit=dev --legacy-peer-deps
 
 # Copy built frontend assets and server files from builder
 COPY --from=builder /app/dist ./dist
