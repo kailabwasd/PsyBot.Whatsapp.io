@@ -1,7 +1,25 @@
+/**
+ * Servicio de Comunicación con la API Backend (Express + Twilio + Gemini)
+ * SubaTECH Salud Mental - Subred Integrada de Servicios de Salud Norte
+ * 
+ * Este módulo centraliza las peticiones HTTP hacia el backend:
+ * - Sincronización de sesiones de chat y guardias
+ * - Envío y recepción de mensajes de WhatsApp en tiempo real vía Twilio
+ * - Protocolo de reintento con retroceso exponencial (Exponential Backoff)
+ * - Registro centralizado de auditoría y diagnósticos de error
+ */
+
 import type { PatientSession, RiskLevel, SystemErrorLog } from '../types/index.ts';
 
 export const DEFAULT_PRODUCTION_BACKEND_URL = 'https://psybot-whatsapp-production.up.railway.app';
 
+/**
+ * Resuelve la URL base del backend según el entorno de ejecución:
+ * 1. URL personalizada configurada por el especialista en ajustes
+ * 2. Variable de entorno VITE_BACKEND_URL
+ * 3. Enlace automático a Railway si se hospeda en GitHub Pages
+ * 4. Origen relativo por defecto (proxy Vite en desarrollo)
+ */
 export function getApiBaseUrl(): string {
   // 1. Custom URL configured by user in settings
   const customUrl = localStorage.getItem('subatech_backend_api_url');
@@ -24,15 +42,9 @@ export function getApiBaseUrl(): string {
   return '';
 }
 
-export function setApiBaseUrl(url: string): void {
-  const clean = url.trim().replace(/\/+$/, '');
-  if (clean) {
-    localStorage.setItem('subatech_backend_api_url', clean);
-  } else {
-    localStorage.removeItem('subatech_backend_api_url');
-  }
-}
-
+/**
+ * Consulta la lista de sesiones de pacientes activas desde el backend Express
+ */
 export async function fetchSessions(): Promise<PatientSession[]> {
   try {
     const base = getApiBaseUrl();
@@ -54,30 +66,7 @@ export async function fetchSessions(): Promise<PatientSession[]> {
   }
 }
 
-export async function sendWhatsAppWebhookMessage(
-  fromNumber: string,
-  bodyText: string,
-  profileName?: string
-): Promise<{ success: boolean; reply: string; session: PatientSession; quickReplies?: string[] }> {
-  const base = getApiBaseUrl();
-  const res = await fetch(`${base}/api/whatsapp`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    },
-    body: JSON.stringify({
-      from: fromNumber,
-      body: bodyText,
-      profileName,
-      isSimulator: true,
-    }),
-  });
-  if (!res.ok) throw new Error('Failed to send webhook message');
-  return res.json();
-}
-
-// Helper: Sleep for given milliseconds
+// Utilidad: Pausa asíncrona en milisegundos para control de flujo
 export const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -248,22 +237,8 @@ export async function reportFirestoreCriticalError(
 }
 
 /**
- * Envoltorio seguro para llamadas asíncronas a Firestore con captura y reporte centralizado
- */
-export async function executeFirestoreSafe<T>(
-  operation: () => Promise<T>,
-  context: { operationName: string; targetRef?: string }
-): Promise<T> {
-  try {
-    return await operation();
-  } catch (err: any) {
-    await reportFirestoreCriticalError(err, context.operationName, context.targetRef);
-    throw err;
-  }
-}
-
-/**
- * Executes an async operation with exponential backoff and automatic token refresh on 401 Unauthorized
+ * Ejecuta una operación asíncrona con algoritmo de retroceso exponencial (Exponential Backoff)
+ * y refresco automático de credenciales Twilio ante códigos HTTP 401 Unauthorized.
  */
 export async function executeWithExponentialBackoff<T>(
   operation: (attempt: number) => Promise<T>,
@@ -521,13 +496,6 @@ export async function clearAllSessions(): Promise<void> {
   if (!res.ok) throw new Error('Failed to clear all sessions');
 }
 
-export async function checkHealth(): Promise<{ status: string; geminiConfigured: boolean; sessionsCount: number }> {
-  const base = getApiBaseUrl();
-  const res = await fetch(`${base}/api/health`);
-  if (!res.ok) throw new Error('Health check failed');
-  return res.json();
-}
-
 export async function fetchSystemErrorLogs(): Promise<SystemErrorLog[]> {
   const base = getApiBaseUrl();
   try {
@@ -689,23 +657,6 @@ export async function triggerAdminTestReport(): Promise<{ success: boolean; mess
     method: 'POST',
   });
   return res.json();
-}
-
-export async function generateAiTags(payload: { summary?: string; messages?: any[]; patientName?: string }): Promise<string[]> {
-  const base = getApiBaseUrl();
-  try {
-    const res = await fetch(`${base}/api/gemini/tags`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) return ['Atención Inicial'];
-    const data = await res.json();
-    return Array.isArray(data.tags) ? data.tags : ['Atención Inicial'];
-  } catch (err) {
-    console.error('Error calling AI tagging endpoint:', err);
-    return ['Atención Inicial'];
-  }
 }
 
 

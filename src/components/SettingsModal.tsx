@@ -44,15 +44,21 @@ import {
   Terminal,
   HelpCircle,
   Activity,
-  Radio
+  Radio,
+  SlidersHorizontal,
+  Volume2,
+  VolumeX,
+  Plus
 } from 'lucide-react';
-import type { PsychologistAuthUser, PsychologistPermissions, UserApprovalStatus, PatientSession, SystemErrorLog } from '../types/index.ts';
+import type { PsychologistAuthUser, PsychologistPermissions, UserApprovalStatus, PatientSession, SystemErrorLog, CrisisAlertPreferences, RiskLevel } from '../types/index.ts';
 import { 
   savePsychologistProfile, 
   approvePsychologist, 
   rejectOrSuspendPsychologist, 
   deletePsychologistFromFirestore,
-  isUserAdmin
+  isUserAdmin,
+  savePsychologistCrisisPreferences,
+  getPsychologistCrisisPreferences
 } from '../lib/firebase.ts';
 import { AuditLog, logAuditEvent } from './AuditLog.tsx';
 import { 
@@ -67,7 +73,7 @@ import {
   triggerAdminTestReport,
   AdminNotificationSettings
 } from '../services/api.ts';
-import { getStoredCrisisKeywords, saveStoredCrisisKeywords, CrisisKeywordEntry } from '../lib/crisisKeywords.ts';
+import { getStoredCrisisKeywords, saveStoredCrisisKeywords, CrisisKeywordEntry, DEFAULT_CRISIS_PREFERENCES } from '../lib/crisisKeywords.ts';
 
 interface SettingsModalProps {
   currentUser: PsychologistAuthUser;
@@ -219,6 +225,101 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setCrisisKeywordsDb([...updated]);
     setCrisisNotice(`Término "${keywordToDelete}" eliminado de la base de datos de crisis.`);
     setTimeout(() => setCrisisNotice(null), 3500);
+  };
+
+  // Preferencias individuales de umbrales y alertas de crisis (almacenadas en Firestore)
+  const initialCrisisPrefs: CrisisAlertPreferences = {
+    ...DEFAULT_CRISIS_PREFERENCES,
+    ...(currentUser.crisisAlertPreferences || {})
+  };
+
+  const [alertThreshold, setAlertThreshold] = useState<number>(initialCrisisPrefs.alertThreshold || 1);
+  const [sensitivityLevel, setSensitivityLevel] = useState<'ALTA' | 'MODERADA' | 'ESTRICTA'>(initialCrisisPrefs.sensitivityLevel || 'MODERADA');
+  const [customKeywords, setCustomKeywords] = useState<string[]>(initialCrisisPrefs.customKeywords || []);
+  const [newCustomKeyword, setNewCustomKeyword] = useState('');
+  const [enabledCategories, setEnabledCategories] = useState(initialCrisisPrefs.enabledCategories || {
+    suicidio: true,
+    crimenViolencia: true,
+    autolesion: true,
+    amenazaInminente: true,
+  });
+  const [minRiskLevelAlert, setMinRiskLevelAlert] = useState<RiskLevel>(initialCrisisPrefs.minRiskLevelAlert || 'MODERADO');
+  const [soundAlertEnabled, setSoundAlertEnabled] = useState<boolean>(initialCrisisPrefs.soundAlertEnabled !== false);
+  const [autoHighlightTranscripts, setAutoHighlightTranscripts] = useState<boolean>(initialCrisisPrefs.autoHighlightTranscripts !== false);
+  const [isSavingCrisisPrefs, setIsSavingCrisisPrefs] = useState(false);
+  const [crisisPrefsSuccess, setCrisisPrefsSuccess] = useState<string | null>(null);
+  const [crisisPrefsError, setCrisisPrefsError] = useState<string | null>(null);
+
+  // Sincronizar preferencias frescas directamente desde Firestore al montar
+  useEffect(() => {
+    let isMounted = true;
+    if (currentUser?.uid) {
+      getPsychologistCrisisPreferences(currentUser.uid, currentUser.email)
+        .then(prefs => {
+          if (!isMounted) return;
+          if (prefs) {
+            setAlertThreshold(prefs.alertThreshold || 1);
+            setSensitivityLevel(prefs.sensitivityLevel || 'MODERADA');
+            setCustomKeywords(prefs.customKeywords || []);
+            if (prefs.enabledCategories) setEnabledCategories(prefs.enabledCategories);
+            if (prefs.minRiskLevelAlert) setMinRiskLevelAlert(prefs.minRiskLevelAlert);
+            setSoundAlertEnabled(prefs.soundAlertEnabled !== false);
+            setAutoHighlightTranscripts(prefs.autoHighlightTranscripts !== false);
+          }
+        })
+        .catch(e => console.warn('Could not load fresh crisis preferences:', e));
+    }
+    return () => { isMounted = false; };
+  }, [currentUser?.uid, currentUser?.email]);
+
+  const handleSaveCrisisPreferences = async () => {
+    setIsSavingCrisisPrefs(true);
+    setCrisisPrefsSuccess(null);
+    setCrisisPrefsError(null);
+    try {
+      const prefs: CrisisAlertPreferences = {
+        alertThreshold,
+        sensitivityLevel,
+        customKeywords,
+        enabledCategories,
+        minRiskLevelAlert,
+        soundAlertEnabled,
+        autoHighlightTranscripts,
+      };
+
+      const updatedUser = await savePsychologistCrisisPreferences(
+        currentUser.uid,
+        currentUser.email,
+        prefs
+      );
+
+      onUpdateUser(updatedUser);
+      setCrisisPrefsSuccess('✓ Preferencias y umbrales de crisis guardados exitosamente en Firestore.');
+      setTimeout(() => setCrisisPrefsSuccess(null), 4000);
+    } catch (err: any) {
+      console.error('Error al guardar preferencias de crisis en Firestore:', err);
+      setCrisisPrefsError('Error al guardar preferencias en Firestore. Verifique su conexión.');
+      setTimeout(() => setCrisisPrefsError(null), 4000);
+    } finally {
+      setIsSavingCrisisPrefs(false);
+    }
+  };
+
+  const handleAddCustomKeyword = (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = newCustomKeyword.trim().toLowerCase();
+    if (!clean) return;
+    if (customKeywords.includes(clean)) {
+      setCrisisPrefsError(`El término "${clean}" ya se encuentra en tu lista de palabras clave.`);
+      setTimeout(() => setCrisisPrefsError(null), 3000);
+      return;
+    }
+    setCustomKeywords(prev => [...prev, clean]);
+    setNewCustomKeyword('');
+  };
+
+  const handleRemoveCustomKeyword = (kwToRemove: string) => {
+    setCustomKeywords(prev => prev.filter(k => k !== kwToRemove));
   };
 
   // Admin WhatsApp Automated Updates & Error Alerts State
@@ -872,18 +973,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
           )}
 
-          {isOwner && (
-            <button
-              onClick={() => setActiveTab('crisiskeywords')}
-              className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition cursor-pointer whitespace-nowrap ${activeTab === 'crisiskeywords' ? 'border-red-500 text-red-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
-            >
-              <ShieldAlert className="w-4 h-4 text-red-400" />
-              <span>Palabras Clave de Crisis</span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-950 text-red-300 border border-red-500/40 font-mono font-bold">
-                {crisisKeywordsDb.reduce((acc, c) => acc + c.keywords.length, 0)}
-              </span>
-            </button>
-          )}
+          {/* Umbrales y Alertas de Crisis (Accesible para todos los psicólogos) */}
+          <button
+            onClick={() => setActiveTab('crisiskeywords')}
+            className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition cursor-pointer whitespace-nowrap ${activeTab === 'crisiskeywords' ? 'border-red-500 text-red-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+          >
+            <ShieldAlert className="w-4 h-4 text-red-400" />
+            <span>Umbrales y Alertas de Crisis</span>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-950 text-red-300 border border-red-500/40 font-mono font-bold">
+              Umbral: {alertThreshold}
+            </span>
+          </button>
 
           <button
             onClick={() => setActiveTab('theme')}
@@ -2455,101 +2555,406 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           )}
 
-          {/* TAB: CRISIS KEYWORDS */}
-          {activeTab === 'crisiskeywords' && isOwner && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
+          {/* TAB: CRISIS KEYWORDS & UMBRALES DE CRISIS */}
+          {activeTab === 'crisiskeywords' && (
+            <div className="space-y-6">
+              {/* Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-slate-800">
                 <div>
-                  <h3 className="text-sm font-bold text-white">Gestión de Palabras Clave de Crisis</h3>
-                  <p className="text-xs text-slate-400">Administra los términos que disparan automáticamente la Alerta Roja de Triage y la notificación WhatsApp a +573107956907.</p>
+                  <div className="flex items-center gap-2">
+                    <ShieldAlert className="w-5 h-5 text-red-400" />
+                    <h3 className="text-base font-bold text-white">Configuración de Umbrales y Alertas de Crisis</h3>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Define tus propios parámetros de sensibilidad clínica, cantidad mínima de coincidencias y términos personalizados. Tus preferencias se sincronizan en tu perfil en la nube de Firestore (<span className="font-mono text-cyan-400">/psychologists/{currentUser.uid}</span>).
+                  </p>
                 </div>
-                <span className="text-[10px] px-2.5 py-1 rounded-full font-mono bg-red-950 text-red-300 border border-red-500/40 font-bold">
-                  {crisisKeywordsDb.reduce((acc, c) => acc + c.keywords.length, 0)} Términos Totales
-                </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[11px] px-2.5 py-1 rounded-full font-mono bg-cyan-950 text-cyan-300 border border-cyan-500/40 font-bold flex items-center gap-1.5">
+                    <Database className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Firestore Conectado</span>
+                  </span>
+                </div>
               </div>
 
-              {crisisNotice && (
-                <div className="p-3 bg-emerald-950/80 border border-emerald-500/40 rounded-xl text-emerald-200 text-xs flex items-center gap-2">
+              {/* Feedback Notifications */}
+              {crisisPrefsSuccess && (
+                <div className="p-3 bg-emerald-950/80 border border-emerald-500/50 rounded-xl text-emerald-200 text-xs flex items-center gap-2 animate-fadeIn">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>{crisisNotice}</span>
+                  <span className="font-medium">{crisisPrefsSuccess}</span>
                 </div>
               )}
 
-              {/* Add New Keyword Form */}
-              <form onSubmit={handleAddCrisisKeyword} className="p-4 rounded-2xl bg-slate-950 border border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-400 mb-1">Categoría de Riesgo</label>
-                  <select
-                    value={newKeywordCategory}
-                    onChange={(e: any) => setNewKeywordCategory(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-750 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-white outline-none"
-                  >
-                    {crisisKeywordsDb.map(c => (
-                      <option key={c.category} value={c.category}>{c.displayName} ({c.category})</option>
-                    ))}
-                  </select>
+              {crisisPrefsError && (
+                <div className="p-3 bg-red-950/80 border border-red-500/50 rounded-xl text-red-200 text-xs flex items-center gap-2 animate-fadeIn">
+                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                  <span className="font-medium">{crisisPrefsError}</span>
+                </div>
+              )}
+
+              {/* SECCIÓN 1: UMBRALES Y SENSIBILIDAD DEL PSICÓLOGO (FIRESTORE) */}
+              <div className="p-5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-5">
+                <div className="flex items-center justify-between border-b border-slate-850 pb-3">
+                  <div className="flex items-center gap-2">
+                    <SlidersHorizontal className="w-4 h-4 text-[#00E5FF]" />
+                    <h4 className="text-sm font-bold text-white">Parámetros de Detección del Especialista</h4>
+                  </div>
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    Psicólogo: {currentUser.displayName || currentUser.email}
+                  </span>
                 </div>
 
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-400 mb-1">Nueva Palabra o Frase Clave</label>
-                  <input
-                    type="text"
-                    value={newKeywordTerm}
-                    onChange={(e) => setNewKeywordTerm(e.target.value)}
-                    placeholder="Ej. sobredosis, matarme, etc."
-                    className="w-full bg-slate-900 border border-slate-750 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-white outline-none font-mono"
-                  />
-                </div>
-
-                <div>
-                  <button
-                    type="submit"
-                    className="w-full py-2 bg-[#00E5FF] hover:bg-[#00D2F4] text-slate-950 font-bold text-xs rounded-xl shadow transition cursor-pointer flex items-center justify-center gap-1.5"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    <span>Agregar Término</span>
-                  </button>
-                </div>
-              </form>
-
-              {/* Keywords Table view by category */}
-              <div className="space-y-4 max-h-[420px] overflow-y-auto pr-1">
-                {crisisKeywordsDb.map(entry => (
-                  <div key={entry.category} className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className={`w-2.5 h-2.5 rounded-full ${entry.severity === 'CRITICA' ? 'bg-red-500 animate-pulse' : 'bg-amber-400'}`} />
-                        <h4 className="text-xs font-bold text-white">{entry.displayName}</h4>
-                        <span className="text-[10px] px-2 py-0.5 rounded font-mono bg-slate-800 text-slate-300">
-                          {entry.category}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  {/* Umbral de Activación (Coincidencias mínimas) */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold text-slate-300">
+                      Umbral de Coincidencias Mínimas para Alerta Roja
+                    </label>
+                    <p className="text-[11px] text-slate-400">
+                      Cantidad de palabras clave o expresiones de riesgo que deben detectarse en el diálogo para clasificar la sesión como Alerta de Crisis.
+                    </p>
+                    <div className="flex items-center gap-2 pt-1">
+                      {[1, 2, 3, 4, 5].map((val) => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => setAlertThreshold(val)}
+                          className={`flex-1 py-2 px-3 rounded-xl font-bold text-xs transition cursor-pointer border ${
+                            alertThreshold === val
+                              ? 'bg-[#C8102E] text-white border-red-400 shadow-lg shadow-red-950/60'
+                              : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
+                          }`}
+                        >
+                          {val} {val === 1 ? 'término' : 'términos'}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 text-[11px] text-slate-300 mt-2">
+                      {alertThreshold === 1 && (
+                        <span className="text-red-300 font-semibold">
+                          ⚡ <span className="font-bold">Alerta Inmediata (Máxima Reactividad):</span> Basta una sola mención explícita o término crítico para disparar la alarma en tu panel de guardia.
                         </span>
-                      </div>
-                      <span className="text-[11px] text-slate-400 font-mono">
-                        {entry.keywords.length} términos
-                      </span>
+                      )}
+                      {alertThreshold === 2 && (
+                        <span className="text-amber-300 font-semibold">
+                          ⚖️ <span className="font-bold">Filtro Estándar Clínico (Recomendado):</span> Requiere al menos 2 términos de riesgo para confirmar la crisis y descartar falsos positivos por modismos.
+                        </span>
+                      )}
+                      {alertThreshold >= 3 && (
+                        <span className="text-cyan-300 font-semibold">
+                          🛡️ <span className="font-bold">Filtro Estricto:</span> Requiere al menos {alertThreshold} coincidencias acumuladas. Adecuado para reducir saturación en guardias de alto volumen.
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Nivel de Sensibilidad del Algoritmo */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold text-slate-300">
+                      Nivel de Sensibilidad del Algoritmo de Triage
+                    </label>
+                    <p className="text-[11px] text-slate-400">
+                      Determina cómo el modelo de IA procesa expresiones indirectas o metáforas de sufrimiento.
+                    </p>
+                    <div className="grid grid-cols-3 gap-2 pt-1">
+                      {(['ALTA', 'MODERADA', 'ESTRICTA'] as const).map((lvl) => (
+                        <button
+                          key={lvl}
+                          type="button"
+                          onClick={() => setSensitivityLevel(lvl)}
+                          className={`py-2 px-3 rounded-xl font-bold text-xs transition cursor-pointer border text-center ${
+                            sensitivityLevel === lvl
+                              ? 'bg-[#00E5FF] text-slate-950 border-cyan-300 shadow-md'
+                              : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
+                          }`}
+                        >
+                          {lvl}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 text-[11px] text-slate-300 mt-2">
+                      {sensitivityLevel === 'ALTA' && 'Incluye modismos coloquiales de desánimo ("no doy más", "me rindo") y expresiones metafóricas.'}
+                      {sensitivityLevel === 'MODERADA' && 'Estándar clínico de SubaTECH: equilibra precisión diagnóstica y detección preventiva oportuna.'}
+                      {sensitivityLevel === 'ESTRICTA' && 'Filtra estrictamente ideación activa, métodos, planes de autolesión o peligro inminente explícito.'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Categorías Clínicas Supervisadas y Nivel Mínimo */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-3 border-t border-slate-850">
+                  {/* Categorías habilitadas */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold text-slate-300">
+                      Categorías Clínicas Supervisadas
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="flex items-center gap-2 p-2 rounded-xl bg-slate-900 border border-slate-800 cursor-pointer text-xs text-slate-200 hover:bg-slate-850">
+                        <input
+                          type="checkbox"
+                          checked={enabledCategories.suicidio}
+                          onChange={(e) => setEnabledCategories(prev => ({ ...prev, suicidio: e.target.checked }))}
+                          className="rounded text-red-500 focus:ring-0 accent-red-500"
+                        />
+                        <span>Riesgo Suicida</span>
+                      </label>
+
+                      <label className="flex items-center gap-2 p-2 rounded-xl bg-slate-900 border border-slate-800 cursor-pointer text-xs text-slate-200 hover:bg-slate-850">
+                        <input
+                          type="checkbox"
+                          checked={enabledCategories.crimenViolencia}
+                          onChange={(e) => setEnabledCategories(prev => ({ ...prev, crimenViolencia: e.target.checked }))}
+                          className="rounded text-red-500 focus:ring-0 accent-red-500"
+                        />
+                        <span>Violencia / Crimen</span>
+                      </label>
+
+                      <label className="flex items-center gap-2 p-2 rounded-xl bg-slate-900 border border-slate-800 cursor-pointer text-xs text-slate-200 hover:bg-slate-850">
+                        <input
+                          type="checkbox"
+                          checked={enabledCategories.autolesion}
+                          onChange={(e) => setEnabledCategories(prev => ({ ...prev, autolesion: e.target.checked }))}
+                          className="rounded text-red-500 focus:ring-0 accent-red-500"
+                        />
+                        <span>Autolesiones</span>
+                      </label>
+
+                      <label className="flex items-center gap-2 p-2 rounded-xl bg-slate-900 border border-slate-800 cursor-pointer text-xs text-slate-200 hover:bg-slate-850">
+                        <input
+                          type="checkbox"
+                          checked={enabledCategories.amenazaInminente}
+                          onChange={(e) => setEnabledCategories(prev => ({ ...prev, amenazaInminente: e.target.checked }))}
+                          className="rounded text-red-500 focus:ring-0 accent-red-500"
+                        />
+                        <span>Amenaza Inminente</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Nivel Mínimo de Riesgo & Notificaciones */}
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 mb-1">
+                        Nivel Mínimo de Riesgo para Alarma Acústica
+                      </label>
+                      <select
+                        value={minRiskLevelAlert}
+                        onChange={(e) => setMinRiskLevelAlert(e.target.value as RiskLevel)}
+                        className="w-full bg-slate-900 border border-slate-800 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                      >
+                        <option value="MODERADO">MODERADO (Riesgo moderado, alto o crisis)</option>
+                        <option value="ALTO">ALTO (Riesgo alto o crisis)</option>
+                        <option value="CRISIS">CRISIS (Exclusivamente alerta roja de emergencia)</option>
+                      </select>
                     </div>
 
-                    <p className="text-[11px] text-slate-400 italic">
-                      💡 Consejo clínico: {entry.clinicalAdvice}
-                    </p>
+                    <div className="space-y-2 pt-1">
+                      <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={soundAlertEnabled}
+                          onChange={(e) => setSoundAlertEnabled(e.target.checked)}
+                          className="rounded text-cyan-400 focus:ring-0 accent-cyan-400"
+                        />
+                        <span>Activar sirena de audio en navegador al superar el umbral</span>
+                      </label>
 
-                    <div className="flex flex-wrap gap-1.5 pt-2">
-                      {entry.keywords.map(kw => (
-                        <span key={kw} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-750 text-slate-200 text-xs font-mono">
+                      <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={autoHighlightTranscripts}
+                          onChange={(e) => setAutoHighlightTranscripts(e.target.checked)}
+                          className="rounded text-cyan-400 focus:ring-0 accent-cyan-400"
+                        />
+                        <span>Resaltar visualmente términos de crisis en transcripciones de chat</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Palabras Clave Personalizadas del Especialista */}
+                <div className="space-y-3 pt-3 border-t border-slate-850">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="block text-xs font-bold text-white">
+                        Términos y Modismos Personalizados del Psicólogo
+                      </label>
+                      <p className="text-[11px] text-slate-400">
+                        Agrega modismos locales, expresiones regionales o palabras particulares que desees que el sistema compute hacia tu umbral de alerta.
+                      </p>
+                    </div>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-mono bg-purple-950 text-purple-300 border border-purple-500/40 font-bold">
+                      {customKeywords.length} personalizados
+                    </span>
+                  </div>
+
+                  <form onSubmit={handleAddCustomKeyword} className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newCustomKeyword}
+                      onChange={(e) => setNewCustomKeyword(e.target.value)}
+                      placeholder="Ej. ganas de desaparecer, me quiero apagar, no aguanto la pálida, etc."
+                      className="flex-1 bg-slate-900 border border-slate-800 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-white outline-none font-mono placeholder:text-slate-600"
+                    />
+                    <button
+                      type="submit"
+                      className="py-2 px-4 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl transition cursor-pointer flex items-center gap-1.5 shrink-0"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Añadir Término</span>
+                    </button>
+                  </form>
+
+                  {customKeywords.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5 p-3 rounded-xl bg-slate-900/60 border border-slate-800">
+                      {customKeywords.map((kw) => (
+                        <span key={kw} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-950/80 border border-purple-500/40 text-purple-200 text-xs font-mono">
                           <span>{kw}</span>
                           <button
                             type="button"
-                            onClick={() => handleDeleteCrisisKeyword(entry.category, kw)}
-                            className="text-slate-500 hover:text-red-400 transition cursor-pointer"
-                            title={`Eliminar "${kw}"`}
+                            onClick={() => handleRemoveCustomKeyword(kw)}
+                            className="text-purple-400 hover:text-red-400 transition cursor-pointer"
+                            title={`Remover "${kw}"`}
                           >
                             <Trash2 className="w-3 h-3" />
                           </button>
                         </span>
                       ))}
                     </div>
+                  ) : (
+                    <p className="text-[11px] text-slate-500 italic">
+                      No has agregado palabras clave personalizadas aún. El sistema utilizará el catálogo base clínico.
+                    </p>
+                  )}
+                </div>
+
+                {/* BOTÓN PRINCIPAL PARA GUARDAR EN FIRESTORE */}
+                <div className="pt-2 flex items-center justify-between border-t border-slate-850">
+                  <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                    <Database className="w-3.5 h-3.5 text-cyan-400" />
+                    Destino: Colección <span className="font-mono text-slate-300">psychologists</span> en Cloud Firestore
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleSaveCrisisPreferences}
+                    disabled={isSavingCrisisPrefs}
+                    className="py-2.5 px-5 bg-gradient-to-r from-[#00E5FF] to-emerald-400 hover:from-[#00D2F4] hover:to-emerald-300 text-slate-950 font-bold text-xs rounded-xl shadow-lg transition cursor-pointer flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {isSavingCrisisPrefs ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
+                        <span>Guardando en Firestore...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4 text-slate-950" />
+                        <span>Guardar Preferencias en Firestore</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* SECCIÓN 2: CATÁLOGO CLÍNICO GLOBAL DE TÉRMINOS SUBATECH */}
+              <div className="p-5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-sm font-bold text-white">Catálogo Clínico Base de Términos de Crisis SubaTECH</h4>
+                    <p className="text-xs text-slate-400">
+                      Base de datos clínica general validada para detección de ideación suicida, violencia y peligro inminente.
+                    </p>
                   </div>
-                ))}
+                  <span className="text-[10px] px-2.5 py-1 rounded-full font-mono bg-red-950 text-red-300 border border-red-500/40 font-bold">
+                    {crisisKeywordsDb.reduce((acc, c) => acc + c.keywords.length, 0)} Términos Totales
+                  </span>
+                </div>
+
+                {crisisNotice && (
+                  <div className="p-3 bg-emerald-950/80 border border-emerald-500/40 rounded-xl text-emerald-200 text-xs flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>{crisisNotice}</span>
+                  </div>
+                )}
+
+                {/* Si es Administrador: formulario para agregar al catálogo global */}
+                {isOwner && (
+                  <form onSubmit={handleAddCrisisKeyword} className="p-4 rounded-xl bg-slate-900 border border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-400 mb-1">Categoría del Catálogo</label>
+                      <select
+                        value={newKeywordCategory}
+                        onChange={(e: any) => setNewKeywordCategory(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-750 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                      >
+                        {crisisKeywordsDb.map(c => (
+                          <option key={c.category} value={c.category}>{c.displayName} ({c.category})</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-400 mb-1">Nuevo Término Global</label>
+                      <input
+                        type="text"
+                        value={newKeywordTerm}
+                        onChange={(e) => setNewKeywordTerm(e.target.value)}
+                        placeholder="Ej. sobredosis, matarme, etc."
+                        className="w-full bg-slate-950 border border-slate-750 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-white outline-none font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <button
+                        type="submit"
+                        className="w-full py-2 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-xl shadow transition cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Añadir al Catálogo Global</span>
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                {/* Visualizador de Categorías del Catálogo Base */}
+                <div className="space-y-4 max-h-[380px] overflow-y-auto pr-1">
+                  {crisisKeywordsDb.map(entry => (
+                    <div key={entry.category} className="p-4 rounded-xl bg-slate-900/70 border border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-2.5 h-2.5 rounded-full ${entry.severity === 'CRITICA' ? 'bg-red-500 animate-pulse' : 'bg-amber-400'}`} />
+                          <h5 className="text-xs font-bold text-white">{entry.displayName}</h5>
+                          <span className="text-[10px] px-2 py-0.5 rounded font-mono bg-slate-800 text-slate-300">
+                            {entry.category}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-slate-400 font-mono">
+                          {entry.keywords.length} términos
+                        </span>
+                      </div>
+
+                      <p className="text-[11px] text-slate-400 italic">
+                        💡 Consejo clínico: {entry.clinicalAdvice}
+                      </p>
+
+                      <div className="flex flex-wrap gap-1.5 pt-2">
+                        {entry.keywords.map(kw => (
+                          <span key={kw} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 text-xs font-mono">
+                            <span>{kw}</span>
+                            {isOwner && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteCrisisKeyword(entry.category, kw)}
+                                className="text-slate-500 hover:text-red-400 transition cursor-pointer"
+                                title={`Eliminar "${kw}" del catálogo global`}
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            )}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           )}

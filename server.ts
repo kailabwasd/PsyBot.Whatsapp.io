@@ -1,3 +1,25 @@
+/**
+ * Servidor Full-Stack Psybot - SubaTECH Salud Mental
+ * Subred Integrada de Servicios de Salud Norte E.S.E. - Bogotá D.C.
+ * 
+ * Arquitectura y responsabilidades principales:
+ * 1. ENTRADA WEB & SERVIDOR DE DESARROLLO VITE:
+ *    Expone el backend Express y monta el middleware de Vite en el puerto 3000
+ *    para ofrecer la SPA de React con enrutamiento híbrido.
+ * 
+ * 2. INTEGRACIÓN TWILIO WHATSAPP BUSINESS:
+ *    Recibe los webhooks entrantes de los pacientes en /api/whatsapp,
+ *    despacha respuestas automatizadas o mensajes directos del psicólogo humano.
+ * 
+ * 3. MOTOR DE TRIAGE Y CONTENCIÓN CON GOOGLE GEMINI:
+ *    Utiliza modelos Gemini para clasificar el nivel de riesgo psicológico
+ *    (BAJO, MODERADO, ALTO, CRISIS) con estructuración JSON validada.
+ * 
+ * 4. ALERTA DE CRISIS Y DETECCIÓN LINGÜÍSTICA:
+ *    Monitorea ideación suicida, violencia o peligro inminente cruzando el texto
+ *    con el catálogo clínico de crisis y notificando a la guardia médica.
+ */
+
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
@@ -14,8 +36,28 @@ dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
-const HOST = '0.0.0.0';
+
+// Parse CLI arguments (--port 3000 --host 0.0.0.0)
+function getArg(flag: string): string | null {
+  const index = process.argv.indexOf(flag);
+  if (index !== -1 && index + 1 < process.argv.length) {
+    return process.argv[index + 1];
+  }
+  return null;
+}
+
+const cliPort = getArg('--port');
+const cliHost = getArg('--host');
+
+// In AI Studio environment, dev server must run on port 3000.
+// Cloud Run injects PORT=8080 by default, so we prioritize --port or port 3000.
+const PORT = cliPort
+  ? Number(cliPort)
+  : (process.env.NODE_ENV === 'production' && process.env.PORT && process.env.PORT !== '8080'
+      ? Number(process.env.PORT)
+      : 3000);
+
+const HOST = cliHost || '0.0.0.0';
 
 // Ensure logs directory and diagnostic log file exist
 const LOGS_DIR = path.join(__dirname, 'logs');
@@ -2541,8 +2583,12 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 
-app.listen(PORT, HOST, () => {
+const server = app.listen(PORT, HOST, () => {
   console.log(`🌿 Psybot server running on http://${HOST}:${PORT}`);
   console.log(`⚡ Twilio WhatsApp webhook ready at POST /api/whatsapp`);
   console.log(`💚 Healthcheck endpoint ready at GET /health`);
+});
+
+server.on('error', (err: any) => {
+  console.error('Fatal server listen error:', err);
 });

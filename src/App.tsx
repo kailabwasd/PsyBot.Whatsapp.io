@@ -13,7 +13,8 @@ import {
   ChevronLeft, 
   ChevronRight,
   Users,
-  Globe
+  Globe,
+  BarChart2
 } from 'lucide-react';
 import type { PatientSession, PsychologistProfile, RiskLevel, PsychologistAuthUser } from './types/index.ts';
 import { 
@@ -30,6 +31,7 @@ import { Header } from './components/Header.tsx';
 import { GeneralQueue } from './components/GeneralQueue.tsx';
 import { ActiveChat } from './components/ActiveChat.tsx';
 import { AiSupervisor } from './components/AiSupervisor.tsx';
+import { AnalyticsDashboard } from './components/AnalyticsDashboard.tsx';
 import { ClinicalReportModal } from './components/ClinicalReportModal.tsx';
 import { ClinicalRecordsView } from './components/ClinicalRecordsView.tsx';
 import { PsychologistLogin } from './components/PsychologistLogin.tsx';
@@ -55,6 +57,7 @@ import {
 } from './lib/clinicalRecordsService.ts';
 import { AppRoute, parseCurrentRoute, navigateTo, normalizeRoute } from './lib/router.ts';
 import { applyAccessibilitySettings, getStoredAccessibilitySettings } from './lib/accessibility.ts';
+import { matchCrisisKeywordWithPreferences } from './lib/crisisKeywords.ts';
 import { 
   notifyPsychologist, 
   requestBrowserNotificationPermission, 
@@ -76,7 +79,7 @@ import {
 } from './lib/firebase.ts';
 import { onAuthStateChanged } from 'firebase/auth';
 
-type NavigationTab = 'QUEUE' | 'ACTIVE' | 'SUPERVISOR' | 'RECORDS' | 'PSYCHOLOGISTS';
+type NavigationTab = 'QUEUE' | 'ACTIVE' | 'SUPERVISOR' | 'RECORDS' | 'PSYCHOLOGISTS' | 'ANALYTICS';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<PsychologistAuthUser | null>(() => getStoredPsychologist());
@@ -107,6 +110,7 @@ export default function App() {
     if (route === 'chat') return 'ACTIVE';
     if (route === 'expedientes') return 'RECORDS';
     if (route === 'supervisor') return 'SUPERVISOR';
+    if (route === 'analitica' as any) return 'ANALYTICS';
     return 'QUEUE';
   });
   const [sessions, setSessions] = useState<PatientSession[]>(() => {
@@ -445,6 +449,7 @@ export default function App() {
     else if (targetRoute === 'expedientes') setActiveTab('RECORDS');
     else if (targetRoute === 'supervisor') setActiveTab('SUPERVISOR');
     else if (targetRoute === 'psicologos') setActiveTab('PSYCHOLOGISTS');
+    else if (targetRoute === 'analitica' as any) setActiveTab('ANALYTICS');
     else if (targetRoute === 'auditoria') {
       setIsSettingsOpen(true);
     }
@@ -463,6 +468,7 @@ export default function App() {
       else if (nextRoute === 'expedientes') setActiveTab('RECORDS');
       else if (nextRoute === 'supervisor') setActiveTab('SUPERVISOR');
       else if (nextRoute === 'psicologos') setActiveTab('PSYCHOLOGISTS');
+      else if (nextRoute === 'analitica' as any) setActiveTab('ANALYTICS');
       else if (nextRoute === 'auditoria') {
         setIsSettingsOpen(true);
       } else if (currentUser && (nextRoute === 'inicio' || nextRoute === 'login' || nextRoute === 'registro')) {
@@ -519,7 +525,11 @@ export default function App() {
         }
         const updatedList = Array.from(map.values()).sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0));
         try {
-          localStorage.setItem('psybot_active_sessions_cache', JSON.stringify(updatedList));
+          const lightweight = updatedList.slice(0, 10).map(s => ({
+            ...s,
+            messages: s.messages ? s.messages.slice(-5) : []
+          }));
+          localStorage.setItem('psybot_active_sessions_cache', JSON.stringify(lightweight));
         } catch (e) {}
         return updatedList;
       });
@@ -570,7 +580,11 @@ export default function App() {
       }
     } else {
       try {
-        localStorage.setItem('psybot_active_sessions_cache', JSON.stringify(list));
+        const lightweight = list.slice(0, 10).map(s => ({
+          ...s,
+          messages: s.messages ? s.messages.slice(-5) : []
+        }));
+        localStorage.setItem('psybot_active_sessions_cache', JSON.stringify(lightweight));
       } catch (e) {
         console.warn('LocalStorage save error:', e);
       }
@@ -604,7 +618,39 @@ export default function App() {
           markCrisisNotified(s.id, s.phoneNumber);
         }
 
-        const isCrisis = (s.state === 'CRISIS_ALERT' || s.riskLevel === 'CRISIS') && !isClaimedOrHuman;
+        // Evaluate psychologist's personalized crisis threshold preferences
+        const psychologistCrisisPrefs = currentUser?.crisisAlertPreferences;
+        const minRiskThreshold = psychologistCrisisPrefs?.minRiskLevelAlert || 'ALTO';
+        
+        let customKeywordMatchSummary = '';
+        let hasReachedKeywordThreshold = false;
+
+        // Check if any message matches custom keywords or thresholds
+        if (s.messages && s.messages.length > 0) {
+          const recentMessages = s.messages.slice(-3);
+          for (const msg of recentMessages) {
+            if (msg.sender === 'user') {
+              const res = matchCrisisKeywordWithPreferences(msg.text, psychologistCrisisPrefs);
+              if (res.matched && res.thresholdReached) {
+                hasReachedKeywordThreshold = true;
+                customKeywordMatchSummary = `Término "${res.keyword}" detectado (${res.matchCount}/${res.threshold} coincidencias).`;
+                break;
+              }
+            }
+          }
+        }
+
+        const isRiskEligible = 
+          minRiskThreshold === 'MODERADO'
+            ? (s.riskLevel === 'MODERADO' || s.riskLevel === 'ALTO' || s.riskLevel === 'CRISIS')
+            : minRiskThreshold === 'ALTO'
+            ? (s.riskLevel === 'ALTO' || s.riskLevel === 'CRISIS')
+            : s.riskLevel === 'CRISIS';
+
+        const isCrisis = 
+          ((s.state === 'CRISIS_ALERT' || s.riskLevel === 'CRISIS') || (isRiskEligible && hasReachedKeywordThreshold)) && 
+          !isClaimedOrHuman;
+
         const alreadyNotifiedCrisis = notifiedCrisisSessionsRef.current.has(s.id) || (s.phoneNumber ? notifiedCrisisSessionsRef.current.has(s.phoneNumber) : false);
 
         // 1. Single Crisis Alert Notification (Fired strictly once per crisis incident)
@@ -612,13 +658,14 @@ export default function App() {
           markCrisisNotified(s.id, s.phoneNumber);
           const notif: NotificationPayload = {
             title: `🚨 ¡Alerta Roja: ${s.userName}!`,
-            body: s.triageSummary || 'Paciente con riesgo crítico detectado en guardia.',
+            body: customKeywordMatchSummary || s.triageSummary || 'Paciente con riesgo crítico detectado en guardia.',
             type: 'CRISIS_ALERT',
             sessionId: s.id,
             patientName: s.userName,
             timestamp: Date.now(),
           };
-          notifyPsychologist(notif, soundEnabled, () => {
+          const shouldPlaySound = soundEnabled && (psychologistCrisisPrefs?.soundAlertEnabled !== false);
+          notifyPsychologist(notif, shouldPlaySound, () => {
             setActiveTab('QUEUE');
             setPreviewModalSession(s);
           });
@@ -1199,6 +1246,22 @@ export default function App() {
                   )}
                 </button>
 
+                {/* Analítica y Gráficos */}
+                <button
+                  onClick={() => {
+                    setActiveTab('ANALYTICS');
+                    handleNavigate('analitica' as any);
+                  }}
+                  className={`px-4 py-2.5 rounded-t-lg transition flex items-center gap-2 whitespace-nowrap shrink-0 border-t-2 ${
+                    activeTab === 'ANALYTICS'
+                      ? 'bg-[#F4F6F9] text-[#0B2545] font-bold border-t-[#FFC800] shadow-sm'
+                      : 'text-slate-200 hover:text-white hover:bg-white/10 border-t-transparent'
+                  }`}
+                >
+                  <BarChart2 className="w-4 h-4 text-[#00E5FF]" />
+                  <span>Analítica y Gráficos</span>
+                </button>
+
                 {/* Tab Portal de Administradores (Only for Administrator) */}
                 {isUserAdminRole && (
                   <button
@@ -1325,6 +1388,14 @@ export default function App() {
               handleClaim(session);
             }}
             onPreview={(session) => setPreviewModalSession(session)}
+          />
+        )}
+
+        {/* TAB 6: Analítica y Gráficos (Recharts) */}
+        {activeTab === 'ANALYTICS' && (
+          <AnalyticsDashboard
+            sessions={sessions}
+            psychologists={allPsychologists}
           />
         )}
 

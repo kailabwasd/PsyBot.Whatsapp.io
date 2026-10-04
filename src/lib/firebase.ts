@@ -1,3 +1,15 @@
+/**
+ * Módulo de Integración con Firebase (Cloud Firestore & Firebase Authentication)
+ * Psybot - SubaTECH Salud Mental
+ * 
+ * Funcionalidades clave:
+ * - Autenticación dual (Google OAuth médico y Correo Electrónico Institucional)
+ * - Protección criptográfica de secretos TOTP (2FA) para cumplimiento normativo en salud
+ * - Configuración de Firestore con memoria caché (memoryLocalCache) para prevenir cuotas locales
+ * - Gestión de perfiles, permisos RBAC y preferencias de umbrales de crisis por psicólogo
+ * - Deduplicación automática de especialistas en tiempo real
+ */
+
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   getAuth, 
@@ -12,8 +24,7 @@ import {
 import { 
   getFirestore, 
   initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
+  memoryLocalCache,
   doc, 
   setDoc, 
   getDoc, 
@@ -23,11 +34,11 @@ import {
   getDocs,
   query,
   where,
-  onSnapshot,
-  type DocumentData
+  onSnapshot
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import type { PsychologistAuthUser, PsychologistPermissions, UserApprovalStatus } from '../types/index.ts';
+import type { PsychologistAuthUser, PsychologistPermissions, UserApprovalStatus, CrisisAlertPreferences } from '../types/index.ts';
+import { DEFAULT_CRISIS_PREFERENCES } from './crisisKeywords.ts';
 import { encryptSecret, decryptSecret } from './cryptoUtils.ts';
 import { generateSecret, generateURI, verifySync } from 'otplib';
 import qrcode from 'qrcode';
@@ -39,17 +50,14 @@ export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfi
 // Initialize Firebase Auth
 export const auth = getAuth(app);
 
-// Initialize Cloud Firestore with High-Performance Multi-Tab IndexedDB Local Cache
+// Initialize Cloud Firestore with memory cache to prevent localStorage QuotaExceededError
 let firestoreDb;
 try {
   firestoreDb = initializeFirestore(app, {
-    localCache: persistentLocalCache({
-      tabManager: persistentMultipleTabManager()
-    })
+    localCache: memoryLocalCache()
   });
-  console.log('[Firestore Turbo] IndexedDB multi-tab cache initialized for instant 0ms loads.');
+  console.log('[Firestore] Initialized with memory cache.');
 } catch (err) {
-  // Fallback to standard instance if already initialized by HMR
   firestoreDb = getFirestore(app);
 }
 
@@ -298,6 +306,77 @@ export async function savePsychologistProfile(profile: PsychologistAuthUser): Pr
   localStorage.setItem('psybot_psychologist_session', JSON.stringify(updatedProfile));
   localStorage.setItem('subatech_psychologist_session', JSON.stringify(updatedProfile));
   return updatedProfile;
+}
+
+/**
+ * Guarda las preferencias de umbrales y alertas de crisis de un psicólogo en Firestore
+ */
+export async function savePsychologistCrisisPreferences(
+  uid: string,
+  email: string | null,
+  preferences: CrisisAlertPreferences
+): Promise<PsychologistAuthUser> {
+  const safeUid = ensureValidUid(uid, email);
+  const userDocRef = doc(db, 'psychologists', safeUid);
+
+  try {
+    await setDoc(userDocRef, {
+      crisisAlertPreferences: preferences,
+      lastPreferencesUpdatedAt: Date.now()
+    }, { merge: true });
+    console.log('[Firestore] Preferencias de alertas de crisis guardadas en Firestore para UID:', safeUid);
+  } catch (error: any) {
+    console.warn('Could not save crisis preferences to Firestore:', error);
+    reportFirestoreCriticalError(error, 'Error al guardar Preferencias de Crisis en Firestore', `UID: ${safeUid}`).catch(() => {});
+  }
+
+  // Actualizar en la sesión en caché local
+  const stored = getStoredPsychologist();
+  const updatedUser: PsychologistAuthUser = {
+    ...(stored || {
+      uid: safeUid,
+      email: email || '',
+      displayName: 'Psicólogo Clínico',
+      role: 'Psicólogo Clínico Titulado',
+      license: '',
+      photoURL: '',
+      provider: 'google.com',
+      specialty: 'Psicología Clínica',
+      termsAccepted: true,
+      profileCompleted: true
+    }),
+    crisisAlertPreferences: preferences
+  };
+
+  try {
+    localStorage.setItem('psybot_psychologist_session', JSON.stringify(updatedUser));
+    localStorage.setItem('subatech_psychologist_session', JSON.stringify(updatedUser));
+  } catch {}
+
+  return updatedUser;
+}
+
+/**
+ * Obtiene las preferencias de alertas de crisis del psicólogo desde Firestore
+ */
+export async function getPsychologistCrisisPreferences(
+  uid: string,
+  email: string | null
+): Promise<CrisisAlertPreferences> {
+  const safeUid = ensureValidUid(uid, email);
+  try {
+    const userDocRef = doc(db, 'psychologists', safeUid);
+    const snap = await getDoc(userDocRef);
+    if (snap.exists() && snap.data().crisisAlertPreferences) {
+      return {
+        ...DEFAULT_CRISIS_PREFERENCES,
+        ...snap.data().crisisAlertPreferences
+      };
+    }
+  } catch (err) {
+    console.warn('Error fetching crisis preferences from Firestore:', err);
+  }
+  return DEFAULT_CRISIS_PREFERENCES;
 }
 
 /**

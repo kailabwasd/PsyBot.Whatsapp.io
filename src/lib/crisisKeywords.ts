@@ -1,7 +1,13 @@
 /**
  * Base de datos clínica de palabras clave de alerta de crisis para SubaTECH Salud Mental
  * Detecta ideación suicida, violencia, crímenes, autolesión y peligro inminente.
+ * 
+ * Este módulo contiene el catálogo base validado por profesionales de salud mental,
+ * algoritmos de normalización diacrítica (remoción de acentos y caracteres especiales)
+ * y evaluadores de riesgo tanto globales como personalizados según los umbrales de cada psicólogo.
  */
+
+import type { CrisisAlertPreferences } from '../types/index.ts';
 
 export interface CrisisKeywordEntry {
   category: 'SUICIDIO' | 'CRIMEN_VIOLENCIA' | 'AUTOLESION' | 'AMENAZA_INMINENTE';
@@ -214,7 +220,9 @@ export function saveStoredCrisisKeywords(db: CrisisKeywordEntry[]) {
 }
 
 /**
- * Normaliza el texto removiendo tildes, signos diacríticos y caracteres de puntuación
+ * Normaliza el texto removiendo tildes, signos diacríticos y caracteres de puntuación.
+ * Esto asegura que frases como "desearía morirme" coincidan con "desearia morirme"
+ * sin depender de si el paciente escribe con ortografía perfecta en WhatsApp.
  */
 export function normalizeClinicalText(text: string): string {
   if (!text) return '';
@@ -225,17 +233,60 @@ export function normalizeClinicalText(text: string): string {
     .trim();
 }
 
+/**
+ * Configuración predeterminada de alertas de crisis para especialistas que aún no
+ * han personalizado sus parámetros en Firestore.
+ * Diseñada siguiendo los lineamientos de la Subred Norte de Salud de Bogotá.
+ */
+export const DEFAULT_CRISIS_PREFERENCES: CrisisAlertPreferences = {
+  alertThreshold: 1, // Por defecto, una sola coincidencia detona la alerta preventiva
+  sensitivityLevel: 'MODERADA',
+  customKeywords: [],
+  enabledCategories: {
+    suicidio: true,
+    crimenViolencia: true,
+    autolesion: true,
+    amenazaInminente: true,
+  },
+  minRiskLevelAlert: 'MODERADO',
+  soundAlertEnabled: true,
+  autoHighlightTranscripts: true,
+};
+
+/**
+ * Resultado estructurado del análisis de palabras clave de crisis.
+ * Proporciona a los componentes clínicos información detallada sobre qué términos detonaron la alerta,
+ * qué categoría diagnóstica representan y qué protocolo de emergencia activar.
+ */
 export interface CrisisMatchResult {
+  /** Indica si se alcanzó el umbral configurado por el psicólogo para detonar alerta */
   matched: boolean;
-  category?: 'SUICIDIO' | 'CRIMEN_VIOLENCIA' | 'AUTOLESION' | 'AMENAZA_INMINENTE';
+  /** Categoría clínica del riesgo (Suicidio, Violencia, Autolesión, etc.) */
+  category?: 'SUICIDIO' | 'CRIMEN_VIOLENCIA' | 'AUTOLESION' | 'AMENAZA_INMINENTE' | 'PERSONALIZADA';
+  /** Nombre amigable de la categoría para presentación en badges de la UI */
   categoryDisplay?: string;
+  /** Término principal o primer término coincidente */
   keyword?: string;
+  /** Lista de todas las palabras o frases coincidentes encontradas en el mensaje */
+  allMatchedKeywords?: string[];
+  /** Cantidad total de coincidencias detectadas */
+  matchCount?: number;
+  /** Indica si la cantidad de coincidencias igualó o superó el umbral configurado */
+  thresholdReached?: boolean;
+  /** Umbral de activación configurado por el profesional (ej. 1, 2 o 3) */
+  threshold?: number;
+  /** Nivel de severidad clínica para priorización visual */
   severity?: 'CRITICA' | 'ALTA';
+  /** Recomendación o indicación de intervención rápida para el psicólogo en guardia */
   clinicalAdvice?: string;
 }
 
 /**
  * Evalúa si el texto del paciente coincide con alguna de las palabras clave de crisis actuales
+ * utilizando coincidencia rápida de catálogo base (umbral = 1).
+ * 
+ * @param text - Mensaje recibido del paciente por WhatsApp o simulador
+ * @returns Resultado del cotejo con el catálogo de emergencia
  */
 export function matchCrisisKeyword(text: string): CrisisMatchResult {
   if (!text || typeof text !== 'string') return { matched: false };
@@ -253,6 +304,10 @@ export function matchCrisisKeyword(text: string): CrisisMatchResult {
           category: entry.category,
           categoryDisplay: entry.displayName,
           keyword: kw,
+          allMatchedKeywords: [kw],
+          matchCount: 1,
+          thresholdReached: true,
+          threshold: 1,
           severity: entry.severity,
           clinicalAdvice: entry.clinicalAdvice,
         };
@@ -260,5 +315,92 @@ export function matchCrisisKeyword(text: string): CrisisMatchResult {
     }
   }
 
-  return { matched: false };
+  return { matched: false, matchCount: 0 };
+}
+
+/**
+ * Algoritmo clínico avanzado que evalúa el texto del paciente considerando:
+ * 1. Los umbrales de activación configurados por el psicólogo (cantidad mínima de coincidencias).
+ * 2. Las palabras clave personalizadas y modismos locales añadidos por el profesional.
+ * 3. Las categorías de riesgo específicas que el profesional tiene activadas o desactivadas.
+ * 
+ * @param text - Texto a analizar (último mensaje o transcripción del paciente)
+ * @param preferences - Preferencias de crisis guardadas en Firestore del psicólogo activo
+ * @returns Diagnóstico de coincidencia con desglose cuantitativo
+ */
+export function matchCrisisKeywordWithPreferences(
+  text: string,
+  preferences?: CrisisAlertPreferences
+): CrisisMatchResult {
+  if (!text || typeof text !== 'string') return { matched: false, matchCount: 0 };
+  const normalized = normalizeClinicalText(text);
+  const db = getStoredCrisisKeywords();
+  const prefs = preferences || DEFAULT_CRISIS_PREFERENCES;
+  const threshold = Math.max(1, prefs.alertThreshold || 1);
+
+  const matchedKeywordsList: string[] = [];
+  let primaryCategory: 'SUICIDIO' | 'CRIMEN_VIOLENCIA' | 'AUTOLESION' | 'AMENAZA_INMINENTE' | 'PERSONALIZADA' = 'SUICIDIO';
+  let primaryCategoryDisplay = 'Ideación y Riesgo Suicida';
+  let primaryAdvice = 'Activar protocolo urgente de contención suicida.';
+  let primarySeverity: 'CRITICA' | 'ALTA' = 'ALTA';
+
+  // 1. Verificar palabras clave personalizadas añadidas por el psicólogo
+  if (Array.isArray(prefs.customKeywords)) {
+    for (const customKw of prefs.customKeywords) {
+      const normalizedCustom = normalizeClinicalText(customKw);
+      if (normalizedCustom && normalized.includes(normalizedCustom)) {
+        if (!matchedKeywordsList.includes(customKw)) {
+          matchedKeywordsList.push(customKw);
+          primaryCategory = 'PERSONALIZADA';
+          primaryCategoryDisplay = 'Palabra Clave Personalizada del Psicólogo';
+          primarySeverity = 'CRITICA';
+          primaryAdvice = `Alerta configurada por el especialista: coincidencia con "${customKw}".`;
+        }
+      }
+    }
+  }
+
+  // 2. Evaluar categorías del catálogo según las preferencias del psicólogo
+  for (const entry of db) {
+    const isCategoryEnabled = 
+      (entry.category === 'SUICIDIO' && prefs.enabledCategories?.suicidio !== false) ||
+      (entry.category === 'CRIMEN_VIOLENCIA' && prefs.enabledCategories?.crimenViolencia !== false) ||
+      (entry.category === 'AUTOLESION' && prefs.enabledCategories?.autolesion !== false) ||
+      (entry.category === 'AMENAZA_INMINENTE' && prefs.enabledCategories?.amenazaInminente !== false);
+
+    if (!isCategoryEnabled) continue;
+
+    for (const kw of entry.keywords) {
+      const normalizedKw = normalizeClinicalText(kw);
+      if (!normalizedKw) continue;
+
+      if (normalized.includes(normalizedKw)) {
+        if (!matchedKeywordsList.includes(kw)) {
+          matchedKeywordsList.push(kw);
+          if (entry.severity === 'CRITICA' || primarySeverity !== 'CRITICA') {
+            primaryCategory = entry.category;
+            primaryCategoryDisplay = entry.displayName;
+            primaryAdvice = entry.clinicalAdvice;
+            primarySeverity = entry.severity;
+          }
+        }
+      }
+    }
+  }
+
+  const matchCount = matchedKeywordsList.length;
+  const thresholdReached = matchCount >= threshold;
+
+  return {
+    matched: thresholdReached,
+    category: primaryCategory,
+    categoryDisplay: primaryCategoryDisplay,
+    keyword: matchedKeywordsList[0],
+    allMatchedKeywords: matchedKeywordsList,
+    matchCount,
+    thresholdReached,
+    threshold,
+    severity: primarySeverity,
+    clinicalAdvice: primaryAdvice,
+  };
 }

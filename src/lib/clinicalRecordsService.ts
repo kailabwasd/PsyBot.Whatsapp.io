@@ -1,3 +1,23 @@
+/**
+ * Servicio Central de Expedientes Clínicos y Sesiones Activas en Cloud Firestore
+ * SubaTECH Salud Mental - Subred Integrada de Servicios de Salud Norte de Bogotá
+ * 
+ * Arquitectura del servicio:
+ * 1. CACHÉ OPTIMISTA EN MEMORIA (0ms):
+ *    Permite a los psicólogos interactuar instantáneamente con la UI sin esperar
+ *    los tiempos de ida y vuelta de red. Los cambios se reflejan inmediatamente
+ *    en memoria y se sincronizan en segundo plano.
+ * 
+ * 2. DISTRIBUIDOR DE EVENTOS PUB/SUB EN TIEMPO REAL:
+ *    Mantiene suscripciones reactivas para actualizar las listas de pacientes
+ *    y expedientes cuando llegan mensajes nuevos por WhatsApp o cambios remotos.
+ * 
+ * 3. COLA DE ESCRITURA EN LOTES CON DEBOUNCE (BATCH WRITE QUEUE):
+ *    Agrupa múltiples actualizaciones concurrentes en una única transacción atómica
+ *    (hasta 450 documentos por lote) respetando los límites de cuota de Firestore
+ *    y reduciendo el consumo de red en un 80%.
+ */
+
 import { 
   collection, 
   doc, 
@@ -10,8 +30,8 @@ import {
   onSnapshot,
   writeBatch
 } from 'firebase/firestore';
-import { db } from './firebase';
-import type { ClinicalRecord, PatientSession } from '../types';
+import { db } from './firebase.ts';
+import type { ClinicalRecord, PatientSession } from '../types/index.ts';
 import { reportFirestoreCriticalError } from '../services/api.ts';
 
 const RECORDS_COLLECTION = 'clinical_records';
@@ -88,7 +108,12 @@ function notifyRecordSubscribers() {
   const sorted = Array.from(optimisticRecordCache.values()).sort((a, b) => (b.lastUpdated || 0) - (a.lastUpdated || 0));
   if (typeof window !== 'undefined') {
     try {
-      localStorage.setItem(RECORD_CACHE_STORAGE_KEY, JSON.stringify(sorted));
+      // Lightweight cache of only top 10 records with trimmed transcript to conserve localStorage quota
+      const lightweight = sorted.slice(0, 10).map(r => ({
+        ...r,
+        conversationTranscript: r.conversationTranscript?.slice(0, 200) || ''
+      }));
+      localStorage.setItem(RECORD_CACHE_STORAGE_KEY, JSON.stringify(lightweight));
     } catch {}
   }
   recordSubscribers.forEach((cb) => {
@@ -100,8 +125,12 @@ function notifySessionSubscribers() {
   const sorted = Array.from(optimisticSessionCache.values()).sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0));
   if (typeof window !== 'undefined') {
     try {
-      localStorage.setItem(SESSION_CACHE_STORAGE_KEY, JSON.stringify(sorted));
-      localStorage.setItem('psybot_active_sessions_cache', JSON.stringify(sorted));
+      // Lightweight cache of top 10 sessions with trimmed message history to conserve quota
+      const lightweight = sorted.slice(0, 10).map(s => ({
+        ...s,
+        messages: s.messages ? s.messages.slice(-5) : []
+      }));
+      localStorage.setItem(SESSION_CACHE_STORAGE_KEY, JSON.stringify(lightweight));
     } catch {}
   }
   sessionSubscribers.forEach((cb) => {

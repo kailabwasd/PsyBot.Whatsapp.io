@@ -144,6 +144,10 @@
           "type": "object",
           "description": "Permisos específicos asignados por el administrador (lectura, escritura, administrativo)"
         },
+        "crisisAlertPreferences": {
+          "type": "object",
+          "description": "Preferencias individuales y umbrales de palabras clave de alerta de crisis del psicólogo para la guardia"
+        },
         "lastLoginAt": {
           "type": "number",
           "description": "Timestamp del último inicio de sesión"
