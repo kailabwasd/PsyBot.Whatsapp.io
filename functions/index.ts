@@ -5,7 +5,8 @@
  * Blocks access if reCAPTCHA verification fails or if the security score is below 0.5.
  */
 
-import { onRequest, type Request, type Response } from 'firebase-functions/v2/https';
+import { onRequest, type Request } from 'firebase-functions/v2/https';
+import type { Response } from 'express';
 import * as logger from 'firebase-functions/logger';
 
 interface RecaptchaResponse {

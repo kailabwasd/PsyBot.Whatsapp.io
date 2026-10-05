@@ -5,7 +5,7 @@
     "nixpacksPlan": {
       "providers": ["node"],
       "variables": {
-        "NIXPACKS_NODE_VERSION": "22.14.0"
+        "NIXPACKS_NODE_VERSION": "20.18.0"
       }
     },
     "buildCommand": "npm install --legacy-peer-deps && npm run build"
