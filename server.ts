@@ -49,15 +49,24 @@ function getArg(flag: string): string | null {
 const cliPort = getArg('--port');
 const cliHost = getArg('--host');
 
+// Detect if running inside Google AI Studio container
+const isAiStudio = Boolean(
+  process.env.APPLET_ID ||
+  process.env.CONTROL_PLANE_PORT ||
+  (process.env.K_SERVICE && process.env.K_SERVICE.startsWith('ais-dev'))
+);
+
 // In AI Studio environment, dev server must run on port 3000.
-// Cloud Run injects PORT=8080 by default, so we prioritize --port or port 3000.
+// On external hosts (Railway, Render, Cloud Run, Docker), strictly listen on process.env.PORT.
 const PORT = cliPort
   ? Number(cliPort)
-  : (process.env.NODE_ENV === 'production' && process.env.PORT && process.env.PORT !== '8080'
-      ? Number(process.env.PORT)
-      : 3000);
+  : (isAiStudio ? 3000 : (Number(process.env.PORT) || 3000));
 
 const HOST = cliHost || '0.0.0.0';
+
+if (!process.env.NODE_ENV) {
+  process.env.NODE_ENV = isAiStudio ? 'development' : 'production';
+}
 
 // Ensure logs directory and diagnostic log file exist
 const LOGS_DIR = path.join(__dirname, 'logs');
@@ -2564,22 +2573,31 @@ app.post('/api/twilio/sync', async (req, res) => {
   }
 });
 
-// Healthcheck endpoint for Railway, Render and Docker deployments
-app.get('/health', (_req, res) => {
+// Healthcheck endpoint for Railway, Render and Docker deployments (supports GET and HEAD)
+app.all('/health', (_req, res) => {
   res.status(200).json({ status: 'ok', timestamp: Date.now(), service: 'psybot-backend' });
 });
 
-// Vite middleware or Static files
-if (process.env.NODE_ENV !== 'production') {
+// Vite middleware in AI Studio dev, static files in production / Railway
+if (isAiStudio && process.env.NODE_ENV !== 'production') {
   const vite = await createViteServer({
     server: { middlewareMode: true },
     appType: 'spa',
   });
   app.use(vite.middlewares);
 } else {
-  app.use(express.static(path.resolve(__dirname, 'dist')));
-  app.get('*', (req, res) => {
-    res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+  const distPath = path.resolve(__dirname, 'dist');
+  app.use(express.static(distPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path === '/health') {
+      return next();
+    }
+    const indexPath = path.join(distPath, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      res.sendFile(indexPath);
+    } else {
+      res.status(404).send('Frontend not built. Please run npm run build.');
+    }
   });
 }
 
